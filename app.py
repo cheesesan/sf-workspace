@@ -20,28 +20,19 @@ def _clean_col_name(name: str) -> str:
 
 
 def detect_header_row(raw: pd.DataFrame, max_scan: int = 25) -> int:
-    """
-    Scan top rows to find a row that looks like header.
-    Heuristic: a row that contains a date-like header cell.
-    """
     patterns = [r"\bdate\b", r"\bdates\b", r"\btime\b", r"\bdatetime\b"]
     for i in range(min(max_scan, len(raw))):
         row = raw.iloc[i].astype(str).str.lower()
         if any(row.str.contains(p).any() for p in patterns):
             return i
-    return 1  # fallback (your earlier sheet style)
+    return 1  # fallback
 
 
 def detect_date_col(columns: list[str]) -> str | None:
-    """
-    Try to find date column name.
-    """
-    # strict first
     for c in columns:
         lc = str(c).strip().lower()
         if lc in {"date", "dates", "time", "datetime"}:
             return c
-    # soft
     for c in columns:
         lc = str(c).strip().lower()
         if "date" in lc or "time" in lc:
@@ -50,11 +41,6 @@ def detect_date_col(columns: list[str]) -> str | None:
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Returns:
-      df_clean: cleaned df (DATE parsed if possible, may not contain DATE if not detected)
-      raw_preview: top rows of raw (for debug)
-    """
     raw = pd.read_excel(file_or_path, sheet_name=sheet_name, header=None)
     raw_preview = raw.head(15)
 
@@ -102,7 +88,6 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
 # Analytics helpers
 # -------------------------
 def ensure_date(df: pd.DataFrame, raw_preview: pd.DataFrame) -> pd.DataFrame:
-    """If DATE not detected, allow manual selection."""
     if "DATE" in df.columns:
         return df
 
@@ -119,54 +104,33 @@ def ensure_date(df: pd.DataFrame, raw_preview: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_returns_and_changes(df: pd.DataFrame, col: str) -> pd.DataFrame:
-    """
-    Adds:
-      - {col}_dchg : daily absolute change
-      - {col}_dret : daily pct return
-      - {col}_mchg : MoM change (value - value_1m_ago)
-      - {col}_ychg : YoY change (value - value_1y_ago)
-      - {col}_mpct : MoM pct change
-      - {col}_ypct : YoY pct change
-    Uses last available observation in 21 trading days (~1m) and 252 (~1y) approximations.
-    """
     out = df.copy()
     s = out[col]
-
     out[f"{col}_dchg"] = s.diff(1)
     out[f"{col}_dret"] = s.pct_change(1)
 
     # Approx trading-day offsets
     out[f"{col}_mchg"] = s - s.shift(21)
     out[f"{col}_ychg"] = s - s.shift(252)
-
     out[f"{col}_mpct"] = s / s.shift(21) - 1
     out[f"{col}_ypct"] = s / s.shift(252) - 1
     return out
 
 
 def rolling_volatility(df: pd.DataFrame, col: str, window: int = 20) -> pd.Series:
-    """Rolling volatility of daily returns."""
     ret = df[col].pct_change(1)
     return ret.rolling(window).std() * np.sqrt(252)  # annualized
 
 
 def pick_groups(cols: list[str]) -> dict[str, list[str]]:
-    """
-    Heuristic grouping by column names:
-      - index: contains 'BDI', 'BCI', 'BPI', 'BSI', 'BHSI'
-      - tc: contains 'TC', 'TCA', '4TC', '5TC', 'avg', 'average' (case-insensitive)
-      - fleet: contains 'fleet', 'orderbook', 'scrap', 'dwt', 'deliv', 'demol' etc.
-    """
     upper = {c: c.upper() for c in cols}
 
     idx_keys = {"BDI", "BCI", "BPI", "BSI", "BHSI"}
     index_cols = [c for c in cols if any(k in upper[c] for k in idx_keys)]
 
     tc_cols = [c for c in cols if any(k in upper[c] for k in ["TC", "TCA", "4TC", "5TC", "AVG", "AVERAGE"])]
-
     fleet_cols = [c for c in cols if any(k in upper[c] for k in ["FLEET", "ORDER", "ORDERBOOK", "SCRAP", "DEMOL", "DELIV", "DWT", "SUPPLY"])]
 
-    # avoid overlaps: if something is already in index, remove from others
     tc_cols = [c for c in tc_cols if c not in index_cols]
     fleet_cols = [c for c in fleet_cols if c not in index_cols and c not in tc_cols]
 
@@ -198,6 +162,31 @@ def plot_single(df: pd.DataFrame, y: str, title: str):
     fig = px.line(tmp, x="DATE", y=y, title=title)
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig, use_container_width=True)
+
+
+# -------------------------
+# Date-range utilities (FINAL FIX)
+# -------------------------
+def quick_range_start(quick: str, end_date: pd.Timestamp) -> pd.Timestamp:
+    if quick == "All":
+        return pd.NaT
+    if quick == "MTD":
+        return pd.Timestamp(end_date.year, end_date.month, 1)
+    if quick == "YTD":
+        return pd.Timestamp(end_date.year, 1, 1)
+    if quick == "Past Week":
+        return end_date - pd.Timedelta(days=7)
+    if quick == "Past Month":
+        return end_date - pd.DateOffset(months=1)
+    if quick == "Past 3 Months":
+        return end_date - pd.DateOffset(months=3)
+    if quick == "Past 6 Months":
+        return end_date - pd.DateOffset(months=6)
+    if quick == "Past Year":
+        return end_date - pd.DateOffset(years=1)
+    if quick == "Past 2 Years":
+        return end_date - pd.DateOffset(years=2)
+    return pd.NaT
 
 
 # -------------------------
@@ -241,30 +230,60 @@ def main():
 
     df = ensure_date(df, raw_preview)
 
-    # Basic info
     if df.empty:
         st.error("No data rows after parsing. Please check your sheet and header settings.")
         st.stop()
 
+    # Ensure sorted
+    df = df.sort_values("DATE").reset_index(drop=True)
+
     st.success(f"Loaded rows: {len(df):,} | columns: {len(df.columns):,}")
+    st.caption(f"Data available through: **{df['DATE'].max().date()}**")
 
     all_metrics = [c for c in df.columns if c != "DATE"]
     groups = pick_groups(all_metrics)
 
-    # Sidebar - Filters
+    # Sidebar - Filters (FINAL: never exceed max data date)
     with st.sidebar:
         st.header("Filters")
 
         min_date = df["DATE"].min().date()
         max_date = df["DATE"].max().date()
-        date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            start_date, end_date = date_range
+
+        # ✅ key idea: end date is ALWAYS max_date (last available data day)
+        end_default = pd.Timestamp(max_date)
+
+        quick = st.selectbox(
+            "Quick range",
+            ["Custom", "Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "MTD", "YTD", "All"],
+            index=1,
+        )
+
+        if quick == "Custom":
+            # Custom picker but max selectable date is still max_date, so no error possible
+            date_range = st.date_input(
+                "Date range",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,  # ✅ critical: cannot pick beyond last data date
+            )
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                start_date, end_date = date_range
+            else:
+                start_date, end_date = min_date, max_date
         else:
-            start_date, end_date = min_date, max_date
+            start_ts = quick_range_start(quick, end_default)
+            if pd.isna(start_ts) or quick == "All":
+                start_date, end_date = min_date, max_date
+            else:
+                start_date = max(start_ts.date(), min_date)
+                end_date = max_date  # ✅ always last data date
+
+            # show the applied range
+            st.caption(f"Applied range: **{start_date} → {end_date}** (end = last data date)")
 
         tab_default = "Index"
-        tab_choice = st.selectbox("Default tab", ["Index", "TC Avg", "Fleet"], index=["Index","TC Avg","Fleet"].index(tab_default))
+        _ = st.selectbox("Default tab", ["Index", "TC Avg", "Fleet"], index=["Index", "TC Avg", "Fleet"].index(tab_default))
 
         st.divider()
         st.subheader("Index analytics")
@@ -284,7 +303,6 @@ def main():
     latest = dff.iloc[-1]
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
-    # show top KPIs: prefer BDI/BPI/BCI/BSI if exist
     kpi_candidates = [c for c in ["BDI", "BPI", "BCI", "BSI", "BHSI"] if c in dff.columns]
     if not kpi_candidates:
         kpi_candidates = all_metrics[:4]
@@ -294,7 +312,7 @@ def main():
         with cols[i]:
             metric_card(latest, prev, name)
 
-    # Tabs on the right (main content)
+    # Tabs
     tabs = st.tabs(["Index", "TC Avg", "Fleet"])
 
     # -------------------------
@@ -317,14 +335,13 @@ def main():
                 plot_multi_line(dff, "DATE", selected_index, "Index series")
 
         with right:
-            # Spread BDI - BPI
             if spread_on and ("BDI" in dff.columns) and ("BPI" in dff.columns):
-                dff["BDI_BPI_SPREAD"] = dff["BDI"] - dff["BPI"]
-                plot_single(dff, "BDI_BPI_SPREAD", "BDI vs BPI spread (BDI - BPI)")
+                tmp = dff.copy()
+                tmp["BDI_BPI_SPREAD"] = tmp["BDI"] - tmp["BPI"]
+                plot_single(tmp, "BDI_BPI_SPREAD", "BDI vs BPI spread (BDI - BPI)")
             else:
                 st.info("Spread chart requires both BDI and BPI columns (or turn it off in sidebar).")
 
-        # Rolling vol + YoY/MoM for a chosen anchor
         st.markdown("### Analytics (choose a base series)")
         base_series = st.selectbox(
             "Base series",
@@ -344,7 +361,7 @@ def main():
             with a1:
                 if vol_on:
                     analytics_df["ROLL_VOL"] = rolling_volatility(analytics_df, base_series, window=int(vol_window))
-                    plot_single(analytics_df.rename(columns={"ROLL_VOL":"ROLL_VOL"}), "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
+                    plot_single(analytics_df, "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
                 else:
                     st.info("Rolling volatility is off (toggle in sidebar).")
 
@@ -352,18 +369,17 @@ def main():
                 if show_yoy_mom:
                     show_cols = [f"{base_series}_mchg", f"{base_series}_ychg"]
                     exist_cols = [c for c in show_cols if c in analytics_df.columns]
-                    if exist_cols:
-                        plot_multi_line(analytics_df.rename(columns={exist_cols[0]:"MoM Change", exist_cols[1]:"YoY Change"}) if len(exist_cols)==2 else analytics_df,
-                                        "DATE",
-                                        exist_cols,
-                                        "MoM / YoY change (absolute)")
+                    if len(exist_cols) == 2:
+                        tmp2 = analytics_df[["DATE"] + exist_cols].copy()
+                        tmp2 = tmp2.rename(columns={exist_cols[0]: "MoM Change", exist_cols[1]: "YoY Change"})
+                        plot_multi_line(tmp2.rename(columns={"MoM Change":"MoM Change", "YoY Change":"YoY Change"}), "DATE", ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
                     else:
                         st.info("Not enough history to compute MoM/YoY changes in this range.")
                 else:
                     st.info("YoY/MoM is off (toggle in sidebar).")
 
         st.markdown("### BDI DATA (table)")
-        default_table_cols = ["DATE"] + ([c for c in ["BDI","BPI","BCI","BSI"] if c in all_metrics] or all_metrics[:5])
+        default_table_cols = ["DATE"] + ([c for c in ["BDI", "BPI", "BCI", "BSI"] if c in all_metrics] or all_metrics[:5])
         table_cols = st.multiselect(
             "Table columns",
             options=["DATE"] + all_metrics,
@@ -408,14 +424,17 @@ def main():
                 tc_df["ROLL_VOL"] = rolling_volatility(tc_df, base_tc, window=int(vol_window))
                 plot_single(tc_df, "ROLL_VOL", f"{base_tc} rolling vol ({vol_window}d, annualized)")
             if show_yoy_mom:
-                # show pct version for TC (more intuitive)
                 pct_cols = [f"{base_tc}_mpct", f"{base_tc}_ypct"]
                 if all(c in tc_df.columns for c in pct_cols):
                     tmp = tc_df[["DATE"] + pct_cols].copy()
-                    tmp = tmp.rename(columns={pct_cols[0]:"MoM %", pct_cols[1]:"YoY %"})
-                    # plotly expects numeric; keep as fraction
-                    fig = px.line(tmp.melt(id_vars="DATE", var_name="Metric", value_name="Value"),
-                                  x="DATE", y="Value", color="Metric", title=f"{base_tc} MoM% / YoY% (fraction)")
+                    tmp = tmp.rename(columns={pct_cols[0]: "MoM %", pct_cols[1]: "YoY %"})
+                    fig = px.line(
+                        tmp.melt(id_vars="DATE", var_name="Metric", value_name="Value"),
+                        x="DATE",
+                        y="Value",
+                        color="Metric",
+                        title=f"{base_tc} MoM% / YoY% (fraction)",
+                    )
                     fig.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10), legend_title_text="")
                     st.plotly_chart(fig, use_container_width=True)
                 else:
