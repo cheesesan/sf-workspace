@@ -315,7 +315,7 @@ def main():
 
     # Sidebar - Data
     with st.sidebar:
-        st.image("C:\Users\Rachel.Yao\Documents\GitHub\sf-workspace\SF_Logo.png", use_container_width=True,
+        st.image("SF_Logo.png", use_container_width=True,
         )
         st.markdown("---")
         st.header("Data")
