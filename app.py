@@ -342,13 +342,18 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
     # Choose vessel INSIDE the page
-    label_to_key = {v: k for k, v in VESSEL_LABELS.items()}
+    key_to_label = VESSEL_LABELS
+    labels = list(key_to_label.values())
+    default_label = key_to_label.get(vessel_group_key, labels[0])
+    default_index = labels.index(default_label) if default_label in labels else 0
+
     vessel_label = st.radio(
         "Choose vessel type",
-        options=list(VESSEL_LABELS.values()),
-        index=list(label_to_key.keys()).index(vessel_group_key) if vessel_group_key in label_to_key.values() else 0,
+        options=labels,
+        index=default_index,
         key="vg_radio",
     )
+    label_to_key = {v: k for k, v in key_to_label.items()}
     vessel_group_key = label_to_key[vessel_label]
 
     group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group_key])
@@ -378,6 +383,7 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     tbl = dff[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
+    st.session_state.vessel_group_key = vessel_group_key
 
 
 # -------------------------
