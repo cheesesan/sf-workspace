@@ -223,7 +223,7 @@ def quick_range_start(quick: str, end_date: pd.Timestamp) -> pd.Timestamp:
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     st.title("BDI Dashboard")
-    st.caption("Excel-based dashboard: Index / TC Avg / Fleet + Spread, Rolling Vol, YoY/MoM changes")
+
 
     # Sidebar - Data
     with st.sidebar:
@@ -274,11 +274,12 @@ def main():
     # Sidebar - Filters (FINAL: never exceed max data date)
     with st.sidebar:
         st.subheader("Vessel group")
-        vessel_group = st.radio(
+        vessel_label = st.radio(
             "Choose a vessel group first",
-            options=list(VESSEL_GROUPS.keys()),
-            format_func=lambda k: f"{k}  |  {VESSEL_LABELS.get(k, k)}",
+            options=list(VESSEL_LABELS.values()),
             index=0,)
+        LABEL_TO_KEY = {v: k for k, v in VESSEL_LABELS.items()}
+        vessel_group = LABEL_TO_KEY[vessel_label]   
 
         st.header("Filters")
 
