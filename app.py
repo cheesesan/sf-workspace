@@ -14,7 +14,8 @@ DEFAULT_SHEET = "BDI INDEX"
 # Helpers: cleaning & load
 # -------------------------
 def _clean_col_name(name: str) -> str:
-    s = str(name).replace("\n", " ").replace("\r", " ").strip()
+    # Convert line breaks/tabs to spaces, then normalize spacing
+    s = str(name).replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
     s = re.sub(r"\s+", " ", s)
     return s
 
@@ -128,7 +129,10 @@ def pick_groups(cols: list[str]) -> dict[str, list[str]]:
     idx_keys = {"BDI", "BCI", "BPI", "BSI", "BHSI"}
     index_cols = [c for c in cols if any(k in upper[c] for k in idx_keys)]
 
-    tc_cols = [c for c in cols if any(k in upper[c] for k in ["TC", "TCA", "4TC", "5TC", "AVG", "AVERAGE"])]
+    tc_cols = [
+        c for c in cols
+        if re.search(r"\b\d*TC\b|\bTCA\b|\bT\/C\b|\bTC\s*AV\b|\b5TC\s*AV\b", upper[c])
+    ]
     fleet_cols = [c for c in cols if any(k in upper[c] for k in ["FLEET", "ORDER", "ORDERBOOK", "SCRAP", "DEMOL", "DELIV", "DWT", "SUPPLY"])]
 
     tc_cols = [c for c in tc_cols if c not in index_cols]
