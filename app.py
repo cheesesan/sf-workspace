@@ -359,7 +359,7 @@ def main():
         min_ts = pd.Timestamp(min_date)
 
         quick = st.selectbox(
-            "Quick range",
+            "Time",
             ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "MTD", "YTD", "All"],
             index=0,
         )
