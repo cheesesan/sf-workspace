@@ -13,6 +13,23 @@ DEFAULT_SHEET = "BDI INDEX"
 # -------------------------
 # Helpers: cleaning & load
 # -------------------------
+VESSEL_GROUPS = {
+    "CAPE": ["C2", "C3", "C5", "C7", "C8-14", "C9-14", "C10-14", "C14", "C16", "C17"],
+    "KMX_82": ["P1A-82", "P2A-82", "P3A-82", "P4-82", "P5-82", "P6-82", "P7-Trial", "P8-Trial"],
+    "PMX_74": ["P1A-03", "P2A-03", "P3A-03"],
+    "SMX_TESS_63": ["S1B-63", "S1C-63", "S2-63", "S3-63", "S4A-63", "S4B-63", "S5-63", "S8-63", "S9-63", "S10-63", "S15-63"],
+    "HANDY_38": ["HS1-38", "HS2-38", "HS3-38", "HS4-38", "HS5-38", "HS6-38", "HS7-38"],
+}
+
+# optional display names
+VESSEL_LABELS = {
+    "CAPE": "Capesize",
+    "KMX_82": "Kamsarmax (82)",
+    "PMX_74": "Panamax (74)",
+    "SMX_TESS_63": "Supramax (TESS 63)",
+    "HANDY_38": "Handysize (38)",
+}
+
 def _clean_col_name(name: str) -> str:
     # Convert line breaks/tabs to spaces, then normalize spacing
     s = str(name).replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
@@ -249,6 +266,13 @@ def main():
 
     # Sidebar - Filters (FINAL: never exceed max data date)
     with st.sidebar:
+        st.subheader("Vessel group")
+        vessel_group = st.radio(
+            "Choose a vessel group first",
+            options=list(VESSEL_GROUPS.keys()),
+            format_func=lambda k: f"{k}  |  {VESSEL_LABELS.get(k, k)}",
+            index=0,)
+
         st.header("Filters")
 
         min_date = df["DATE"].min().date()
@@ -317,7 +341,7 @@ def main():
             metric_card(latest, prev, name)
 
     # Tabs
-    tabs = st.tabs(["Index", "TC Avg", "Fleet"])
+    tabs = st.tabs(["Index", "TC Avg", "Routes / Legs"])
 
     # -------------------------
     # Tab: Index
@@ -406,11 +430,12 @@ def main():
     with tabs[1]:
         st.markdown("### TC Avg")
         tc_cols = groups["TC Avg"]
+        tc_candidates = [c for c in all_metrics if "TC AV" in c.upper() or "5TC AV" in c.upper()]
 
         selected_tc = st.multiselect(
             "Select TC Avg series",
             options=all_metrics,
-            default=tc_cols[:3],
+            default=tc_candidates if tc_candidates else tc_cols[:3],
             key="tc_series",
         )
         if selected_tc:
@@ -462,39 +487,42 @@ def main():
         )
 
     # -------------------------
-    # Tab: Fleet
+    # Tab: Vessel Group
     # -------------------------
-    with tabs[2]:
-        st.markdown("### Fleet")
-        fleet_cols = groups["Fleet"]
+with tabs[2]:
+    st.markdown("### Routes / Legs (by vessel group)")
 
-        if not fleet_cols:
-            st.warning("No fleet-like columns detected (keywords: FLEET/ORDERBOOK/SCRAP/DELIV/DWT). You can select any numeric columns below.")
-            fleet_cols = all_metrics
-
-        selected_fleet = st.multiselect(
-            "Select Fleet series",
-            options=all_metrics,
-            default=fleet_cols[:3],
-            key="fleet_series",
+    group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group])
+    if not group_cols:
+        st.warning(f"No columns found for {vessel_group}. Check your Excel headers.")
+        st.write("Expected columns:", VESSEL_GROUPS[vessel_group])
+    else:
+        # default select all in that vessel group
+        selected_routes = st.multiselect(
+            f"Select series for {vessel_group}",
+            options=group_cols,
+            default=group_cols,
+            key=f"routes_{vessel_group}",
         )
-        if selected_fleet:
-            plot_multi_line(dff, "DATE", selected_fleet, "Fleet series")
 
-        st.markdown("### Fleet DATA (table)")
+        if selected_routes:
+            plot_multi_line(dff, "DATE", selected_routes, f"{vessel_group} series")
+
+        st.markdown("### Data table")
         table_cols = st.multiselect(
             "Table columns",
-            options=["DATE"] + all_metrics,
-            default=["DATE"] + selected_fleet[:6] if selected_fleet else ["DATE"] + all_metrics[:5],
-            key="fleet_table_cols",
+            options=["DATE"] + group_cols,
+            default=["DATE"] + (selected_routes[:8] if selected_routes else group_cols[:8]),
+            key=f"routes_table_{vessel_group}",
         )
-        table = dff[table_cols].copy()
-        table["DATE"] = table["DATE"].dt.date
-        st.dataframe(table, use_container_width=True, height=420)
+        tbl = dff[table_cols].copy()
+        tbl["DATE"] = tbl["DATE"].dt.date
+        st.dataframe(tbl, use_container_width=True, height=420)
+
         st.download_button(
-            "Download filtered table as CSV",
-            data=table.to_csv(index=False).encode("utf-8"),
-            file_name="bdi_dashboard_fleet_filtered.csv",
+            "Download routes table as CSV",
+            data=tbl.to_csv(index=False).encode("utf-8"),
+            file_name=f"bdi_dashboard_{vessel_group}_routes_filtered.csv",
             mime="text/csv",
         )
 
