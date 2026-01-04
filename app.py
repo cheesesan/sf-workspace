@@ -61,7 +61,7 @@ def detect_date_col(columns: list[str]) -> str | None:
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw = pd.read_excel(file_or_path, sheet_name=sheet_name, header=None)
+    raw = pd.read_excel(file_or_path, sheet_name=sheet_name, header=None, engine="openpyxl")
     raw_preview = raw.head(15)
 
     if header_row is None:
@@ -98,6 +98,7 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
     return df, raw_preview
+
 
 
 def ensure_date(df: pd.DataFrame, raw_preview: pd.DataFrame) -> pd.DataFrame:
@@ -321,9 +322,19 @@ def main():
         auto_header = st.checkbox("Auto-detect header row", value=True)
         header_row_input = st.number_input("Header row (0-based, if not auto)", min_value=0, max_value=80, value=1, step=1, disabled=auto_header)
 
-    file_src = uploaded if uploaded is not None else DEFAULT_XLSX_PATH
+    file_src = uploaded
     if uploaded is None and not DEFAULT_XLSX_PATH.exists():
         st.error(f"Cannot find default file: {DEFAULT_XLSX_PATH}. Upload an Excel or put it under data/BDI DATA.xlsx")
+        st.stop()
+    # =========================
+    # Guard: no file uploaded
+    # =========================
+    if uploaded is None:
+        st.title("BDI Dashboard")
+        st.subheader("Quick view (latest in range)")
+        st.info("📄 Please upload **BDI DATA.xlsx** file to continue。")
+
+        st.caption("Upload the Excel file from the sidebar, then click **Open page**.")
         st.stop()
 
     hdr = None if auto_header else int(header_row_input)
@@ -377,7 +388,6 @@ def main():
         vol_window = st.number_input("Vol window (days)", min_value=5, max_value=120, value=20, step=1, disabled=not vol_on)
         show_yoy_mom = st.checkbox("Show YoY/MoM change", value=True)
 
-        go = st.button("Open page")
 
     # Filtered df
     dff = df[(df["DATE"].dt.date >= start_date) & (df["DATE"].dt.date <= end_date)].copy()
