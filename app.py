@@ -489,42 +489,42 @@ def main():
     # -------------------------
     # Tab: Vessel Group
     # -------------------------
-with tabs[2]:
-    st.markdown("### Routes / Legs (by vessel group)")
+    with tabs[2]:
+        st.markdown("### Routes / Legs (by vessel group)")
 
-    group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group])
-    if not group_cols:
-        st.warning(f"No columns found for {vessel_group}. Check your Excel headers.")
-        st.write("Expected columns:", VESSEL_GROUPS[vessel_group])
-    else:
+        group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group])
+        if not group_cols:
+            st.warning(f"No columns found for {vessel_group}. Check your Excel headers.")
+            st.write("Expected columns:", VESSEL_GROUPS[vessel_group])
+        else:
         # default select all in that vessel group
-        selected_routes = st.multiselect(
-            f"Select series for {vessel_group}",
-            options=group_cols,
-            default=group_cols,
-            key=f"routes_{vessel_group}",
-        )
+            selected_routes = st.multiselect(
+                f"Select series for {vessel_group}",
+                options=group_cols,
+                default=group_cols,
+                key=f"routes_{vessel_group}",
+            )
 
-        if selected_routes:
-            plot_multi_line(dff, "DATE", selected_routes, f"{vessel_group} series")
+            if selected_routes:
+                plot_multi_line(dff, "DATE", selected_routes, f"{vessel_group} series")
 
-        st.markdown("### Data table")
-        table_cols = st.multiselect(
-            "Table columns",
-            options=["DATE"] + group_cols,
-            default=["DATE"] + (selected_routes[:8] if selected_routes else group_cols[:8]),
-            key=f"routes_table_{vessel_group}",
-        )
-        tbl = dff[table_cols].copy()
-        tbl["DATE"] = tbl["DATE"].dt.date
-        st.dataframe(tbl, use_container_width=True, height=420)
+            st.markdown("### Data table")
+            table_cols = st.multiselect(
+                "Table columns",
+                options=["DATE"] + group_cols,
+                default=["DATE"] + (selected_routes[:8] if selected_routes else group_cols[:8]),
+                key=f"routes_table_{vessel_group}",
+            )
+            tbl = dff[table_cols].copy()
+            tbl["DATE"] = tbl["DATE"].dt.date
+            st.dataframe(tbl, use_container_width=True, height=420)
 
-        st.download_button(
-            "Download routes table as CSV",
-            data=tbl.to_csv(index=False).encode("utf-8"),
-            file_name=f"bdi_dashboard_{vessel_group}_routes_filtered.csv",
-            mime="text/csv",
-        )
+            st.download_button(
+                "Download routes table as CSV",
+                data=tbl.to_csv(index=False).encode("utf-8"),
+                file_name=f"bdi_dashboard_{vessel_group}_routes_filtered.csv",
+                mime="text/csv",
+            )
 
 
 if __name__ == "__main__":
