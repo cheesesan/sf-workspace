@@ -360,7 +360,7 @@ def main():
 
         quick = st.selectbox(
             "Time",
-            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "MTD", "YTD", "All"],
+            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Month to Date", "Year to Date", "All"],
             index=0,
         )
         start_ts = quick_range_start(quick, end_default, min_ts)
