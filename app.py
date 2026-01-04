@@ -359,13 +359,16 @@ def main():
         page = st.selectbox("Choose page", ["Home", "Index", "TC Avg", "Vessel Group"], index=0)
 
         # vessel group selection only matters if page is Vessel Group
-        vessel_label = st.selectbox(
-            "Vessel type (only for Vessel Group page)",
-            options=list(VESSEL_LABELS.values()),
-            index=0,
-        )
-        label_to_key = {v: k for k, v in VESSEL_LABELS.items()}
-        vessel_group_key = label_to_key[vessel_label]
+        vessel_group_key = None
+        if page == "Vessel Group":
+            vessel_label = st.selectbox(
+                "Vessel type",
+                options=list(VESSEL_LABELS.values()),
+                index=0,
+            )
+            label_to_key = {v: k for k, v in VESSEL_LABELS.items()}
+            vessel_group_key = label_to_key[vessel_label]
+        go = st.button("Open page", use_container_width=True)
 
         # analytics toggles (apply to Index/TC pages)
         st.divider()
@@ -388,7 +391,9 @@ def main():
 
     if go:
         st.session_state.active_page = page
-        st.session_state.vessel_group_key = vessel_group_key
+        if page == "Vessel Group" and vessel_group_key is not None:
+            st.session_state.vessel_group_key = vessel_group_key
+            vessel_key = st.session_state.get("vessel_group_key", "CAPE")
 
     active = st.session_state.active_page
     vessel_key = st.session_state.get("vessel_group_key", vessel_group_key)
