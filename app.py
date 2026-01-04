@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -8,6 +9,7 @@ import plotly.express as px
 APP_TITLE = "BDI Dashboard"
 DEFAULT_XLSX_PATH = Path("data") / "BDI DATA.xlsx"
 DEFAULT_SHEET = "BDI INDEX"
+
 
 # -------------------------
 # Vessel groups
@@ -20,7 +22,7 @@ VESSEL_GROUPS = {
     "HANDY_38": ["HS1-38", "HS2-38", "HS3-38", "HS4-38", "HS5-38", "HS6-38", "HS7-38"],
 }
 
-# UI labels (only show these)
+# UI labels (sidebar/page only show these)
 VESSEL_LABELS = {
     "CAPE": "Capesize",
     "KMX_82": "Kamsarmax (82)",
@@ -61,6 +63,7 @@ def detect_date_col(columns: list[str]) -> str | None:
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    # NOTE: engine="openpyxl" avoids "Excel file format cannot be determined"
     raw = pd.read_excel(file_or_path, sheet_name=sheet_name, header=None, engine="openpyxl")
     raw_preview = raw.head(15)
 
@@ -72,8 +75,10 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
     df.columns = headers
     df = df.dropna(how="all")
 
+    # drop empty columns
     df = df.loc[:, [c for c in df.columns if not (pd.isna(c) or str(c).strip() == "")]]
 
+    # clean column names + dedupe
     cleaned = [_clean_col_name(c) for c in df.columns]
     seen = {}
     new_cols = []
@@ -86,6 +91,7 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
             new_cols.append(c)
     df.columns = new_cols
 
+    # detect date col
     date_col = detect_date_col(df.columns.tolist())
     if date_col is not None:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -93,12 +99,12 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
         if date_col != "DATE":
             df = df.rename(columns={date_col: "DATE"})
 
+    # numeric
     for c in df.columns:
         if c != "DATE":
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
     return df, raw_preview
-
 
 
 def ensure_date(df: pd.DataFrame, raw_preview: pd.DataFrame) -> pd.DataFrame:
@@ -181,17 +187,19 @@ def quick_range_start(quick: str, end_date: pd.Timestamp, min_date: pd.Timestamp
 # -------------------------
 # Pages
 # -------------------------
-def render_home(dff: pd.DataFrame, all_metrics: list[str]):
+def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
-    st.success(f"Loaded rows: {len(dff):,} | columns: {len(all_metrics) + 1:,}")
-    st.caption(f"Data available through: **{dff['DATE'].max().date()}**")
-
     st.subheader("Quick view (latest in range)")
+
+    if dff is None or dff.empty:
+        st.info("📄 Please upload **BDI DATA.xlsx** from the sidebar, then click **Open page**.")
+        return
+
     latest = dff.iloc[-1]
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
     kpi_candidates = [c for c in ["BDI", "BPI", "BCI", "BSI", "BHSI"] if c in dff.columns]
-    if not kpi_candidates:
+    if not kpi_candidates and all_metrics:
         kpi_candidates = all_metrics[:4]
 
     cols = st.columns(min(4, len(kpi_candidates)))
@@ -206,71 +214,125 @@ def render_home(dff: pd.DataFrame, all_metrics: list[str]):
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
 
 
-def render_index_page(dff: pd.DataFrame, all_metrics: list[str], spread_on: bool, vol_on: bool, vol_window: int, show_yoy_mom: bool):
+def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
 
-    # choose index series
     default_idx = [c for c in ["BDI", "BPI", "BCI", "BSI"] if c in all_metrics]
-    selected_index = st.multiselect("Select index series to plot", options=all_metrics, default=default_idx, key="idx_sel")
+    selected_index = st.multiselect(
+        "Select index series to plot",
+        options=all_metrics,
+        default=default_idx,
+        key="idx_sel",
+    )
     if selected_index:
         plot_multi_line(dff, selected_index, "Index series")
 
-    # spread
-    if spread_on and ("BDI" in dff.columns) and ("BPI" in dff.columns):
-        tmp = dff.copy()
-        tmp["BDI_BPI_SPREAD"] = tmp["BDI"] - tmp["BPI"]
-        plot_single(tmp, "BDI_BPI_SPREAD", "BDI vs BPI spread (BDI - BPI)")
-
+    # ---- Analytics controls (moved INSIDE the page) ----
     st.subheader("Analytics (choose a base series)")
-    base_series = st.selectbox("Base series", options=all_metrics, index=all_metrics.index("BDI") if "BDI" in all_metrics else 0)
+
+    base_series = st.selectbox(
+        "Base series",
+        options=all_metrics,
+        index=all_metrics.index("BDI") if "BDI" in all_metrics else 0,
+        key="idx_base",
+    )
+
+    show_vol = st.checkbox("Show rolling volatility", value=True, key="idx_vol_on")
+    vol_window = st.number_input(
+        "Vol window (days)",
+        min_value=5,
+        max_value=120,
+        value=20,
+        step=1,
+        disabled=not show_vol,
+        key="idx_vol_win",
+    )
+    show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="idx_yoymom_on")
+
     analytics_df = dff[["DATE", base_series]].dropna()
     analytics_df = add_returns_and_changes(analytics_df, base_series)
 
     c1, c2 = st.columns(2)
     with c1:
-        if vol_on:
+        if show_vol:
             analytics_df["ROLL_VOL"] = rolling_volatility(analytics_df, base_series, window=int(vol_window))
             plot_single(analytics_df, "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
     with c2:
         if show_yoy_mom:
             mom = f"{base_series}_mchg"
             yoy = f"{base_series}_ychg"
-            if mom in analytics_df.columns and yoy in analytics_df.columns:
-                plot_multi_line(analytics_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"}), ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
+            tmp = analytics_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
+            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
 
     st.subheader("BDI DATA (table)")
-    table_cols = st.multiselect("Table columns", options=["DATE"] + all_metrics, default=["DATE"] + default_idx, key="idx_tbl")
+    table_cols = st.multiselect(
+        "Table columns",
+        options=["DATE"] + all_metrics,
+        default=["DATE"] + default_idx,
+        key="idx_tbl",
+    )
     tbl = dff[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
 
-def render_tc_page(dff: pd.DataFrame, all_metrics: list[str], vol_on: bool, vol_window: int, show_yoy_mom: bool):
+def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("TC Avg")
 
-    tc_candidates = [c for c in all_metrics if "TC AV" in c.upper() or "5TC AV" in c.upper()]
-    selected_tc = st.multiselect("Select TC Avg series", options=all_metrics, default=tc_candidates, key="tc_sel")
+    tc_candidates = [c for c in all_metrics if ("TC AV" in c.upper() or "5TC AV" in c.upper())]
+    selected_tc = st.multiselect(
+        "Select TC Avg series",
+        options=all_metrics,
+        default=tc_candidates,
+        key="tc_sel",
+    )
     if selected_tc:
         plot_multi_line(dff, selected_tc, "TC Avg series")
 
-    st.subheader("TC Avg analytics (YoY/MoM + Vol)")
-    base_tc = st.selectbox("Base TC series", options=all_metrics, index=0, key="tc_base")
+    # ---- Analytics controls (moved INSIDE the page) ----
+    st.subheader("Analytics (choose a base series)")
+
+    base_tc = st.selectbox(
+        "Base TC series",
+        options=all_metrics,
+        index=all_metrics.index(selected_tc[0]) if selected_tc else 0,
+        key="tc_base",
+    )
+
+    show_vol = st.checkbox("Show rolling volatility", value=True, key="tc_vol_on")
+    vol_window = st.number_input(
+        "Vol window (days)",
+        min_value=5,
+        max_value=120,
+        value=20,
+        step=1,
+        disabled=not show_vol,
+        key="tc_vol_win",
+    )
+    show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="tc_yoymom_on")
+
     tc_df = dff[["DATE", base_tc]].dropna()
     tc_df = add_returns_and_changes(tc_df, base_tc)
 
-    if vol_on:
-        tc_df["ROLL_VOL"] = rolling_volatility(tc_df, base_tc, window=int(vol_window))
-        plot_single(tc_df, "ROLL_VOL", f"{base_tc} rolling vol ({vol_window}d, annualized)")
-
-    if show_yoy_mom:
-        mp = f"{base_tc}_mpct"
-        yp = f"{base_tc}_ypct"
-        if mp in tc_df.columns and yp in tc_df.columns:
-            tmp = tc_df.rename(columns={mp: "MoM %", yp: "YoY %"})
-            plot_multi_line(tmp, ["MoM %", "YoY %"], f"{base_tc} MoM% / YoY% (fraction)")
+    c1, c2 = st.columns(2)
+    with c1:
+        if show_vol:
+            tc_df["ROLL_VOL"] = rolling_volatility(tc_df, base_tc, window=int(vol_window))
+            plot_single(tc_df, "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
+    with c2:
+        if show_yoy_mom:
+            mom = f"{base_tc}_mchg"
+            yoy = f"{base_tc}_ychg"
+            tmp = tc_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
+            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
 
     st.subheader("TC DATA (table)")
-    table_cols = st.multiselect("Table columns", options=["DATE"] + all_metrics, default=["DATE"] + (selected_tc[:6] if selected_tc else all_metrics[:6]), key="tc_tbl")
+    table_cols = st.multiselect(
+        "Table columns",
+        options=["DATE"] + all_metrics,
+        default=["DATE"] + (selected_tc[:6] if selected_tc else all_metrics[:6]),
+        key="tc_tbl",
+    )
     tbl = dff[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
@@ -279,11 +341,14 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str], vol_on: bool, vol_
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
-    # sub bar inside the page
-    # show label-only, map back to key
+    # Choose vessel INSIDE the page
     label_to_key = {v: k for k, v in VESSEL_LABELS.items()}
-    vessel_label = st.radio("Choose vessel type", options=list(VESSEL_LABELS.values()),
-                            index=list(VESSEL_LABELS.keys()).index(vessel_group_key))
+    vessel_label = st.radio(
+        "Choose vessel type",
+        options=list(VESSEL_LABELS.values()),
+        index=list(label_to_key.keys()).index(vessel_group_key) if vessel_group_key in label_to_key.values() else 0,
+        key="vg_radio",
+    )
     vessel_group_key = label_to_key[vessel_label]
 
     group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group_key])
@@ -294,14 +359,22 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
         st.write("Expected columns:", VESSEL_GROUPS[vessel_group_key])
         return
 
-    selected_routes = st.multiselect("Select series", options=group_cols, default=group_cols, key=f"routes_{vessel_group_key}")
+    selected_routes = st.multiselect(
+        "Select series",
+        options=group_cols,
+        default=group_cols,
+        key=f"routes_{vessel_group_key}",
+    )
     if selected_routes:
         plot_multi_line(dff, selected_routes, f"{vessel_label} series")
 
     st.subheader("Data table")
-    table_cols = st.multiselect("Table columns", options=["DATE"] + group_cols,
-                                default=["DATE"] + (selected_routes[:8] if selected_routes else group_cols[:8]),
-                                key=f"routes_tbl_{vessel_group_key}")
+    table_cols = st.multiselect(
+        "Table columns",
+        options=["DATE"] + group_cols,
+        default=["DATE"] + (selected_routes[:8] if selected_routes else group_cols[:8]),
+        key=f"routes_tbl_{vessel_group_key}",
+    )
     tbl = dff[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
@@ -313,113 +386,146 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-    # Sidebar - Data
-    with st.sidebar:
-        st.image("SF_Logo.png", use_container_width=True,
-        )
-        st.markdown("---")
-        st.header("Data")
-        uploaded = st.file_uploader("Upload your BDI DATA.xlsx (optional)", type=["xlsx"])
-        sheet_name = st.text_input("Sheet name", value=DEFAULT_SHEET)
-
-        auto_header = st.checkbox("Auto-detect header row", value=True)
-        header_row_input = st.number_input("Header row (0-based, if not auto)", min_value=0, max_value=80, value=1, step=1, disabled=auto_header)
-
-    file_src = uploaded
-    if uploaded is None and not DEFAULT_XLSX_PATH.exists():
-        st.error(f"Cannot find default file: {DEFAULT_XLSX_PATH}. Upload an Excel or put it under data/BDI DATA.xlsx")
-        st.stop()
-    # =========================
-    # Guard: no file uploaded
-    # =========================
-    if uploaded is None:
-        st.title("BDI Dashboard")
-        st.subheader("Quick view (latest in range)")
-        st.info("📄 Please upload **BDI DATA.xlsx** file to continue。")
-
-        st.caption("Upload the Excel file from the sidebar, then click **Open page**.")
-        st.stop()
-
-    hdr = None if auto_header else int(header_row_input)
-    df, raw_preview = load_excel(file_src, sheet_name=sheet_name, header_row=hdr)
-    df = ensure_date(df, raw_preview).sort_values("DATE").reset_index(drop=True)
-
-    if df.empty:
-        st.error("No data rows after parsing.")
-        st.stop()
-
-    all_metrics = [c for c in df.columns if c != "DATE"]
-
-    # Sidebar - Filters (quick range only; end always = last data date)
-    with st.sidebar:
-        st.header("Filters")
-        min_date = df["DATE"].min().date()
-        max_date = df["DATE"].max().date()
-        end_default = pd.Timestamp(max_date)
-        min_ts = pd.Timestamp(min_date)
-
-        quick = st.selectbox(
-            "Time",
-            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Month to Date", "Year to Date", "All"],
-            index=0,
-        )
-        start_ts = quick_range_start(quick, end_default, min_ts)
-        start_date = max(start_ts.date(), min_date)
-        end_date = max_date
-
-        st.caption(f"Applied: **{start_date} → {end_date}** (end = last data date)")
-
-        st.header("Default page")
-        page = st.selectbox("Choose page", ["Home", "Index", "TC Avg", "Vessel Group"], index=0)
-
-        # vessel group selection only matters if page is Vessel Group
-        vessel_group_key = None
-        if page == "Vessel Group":
-            vessel_label = st.selectbox(
-                "Vessel type",
-                options=list(VESSEL_LABELS.values()),
-                index=0,
-            )
-            label_to_key = {v: k for k, v in VESSEL_LABELS.items()}
-            vessel_group_key = label_to_key[vessel_label]
-        go = st.button("Open page", use_container_width=True)
-
-        # analytics toggles (apply to Index/TC pages)
-        st.divider()
-        spread_on = st.checkbox("Show BDI vs BPI spread", value=True)
-        vol_on = st.checkbox("Show rolling volatility", value=True)
-        vol_window = st.number_input("Vol window (days)", min_value=5, max_value=120, value=20, step=1, disabled=not vol_on)
-        show_yoy_mom = st.checkbox("Show YoY/MoM change", value=True)
-
-
-    # Filtered df
-    dff = df[(df["DATE"].dt.date >= start_date) & (df["DATE"].dt.date <= end_date)].copy()
-    if dff.empty:
-        st.warning("No data in selected range.")
-        st.stop()
-
-    # Session routing: only jump when user clicks button
+    # Init session state
     if "active_page" not in st.session_state:
         st.session_state.active_page = "Home"
+    if "data_loaded" not in st.session_state:
+        st.session_state.data_loaded = False
+    if "df" not in st.session_state:
+        st.session_state.df = None
+    if "all_metrics" not in st.session_state:
+        st.session_state.all_metrics = None
+    if "vessel_group_key" not in st.session_state:
+        st.session_state.vessel_group_key = "CAPE"
 
+    # -------------------------
+    # Sidebar: ONLY Logo / Data / Filters / Default page + Open page
+    # -------------------------
+    with st.sidebar:
+        # Logo
+        try:
+            st.image("SF_Logo.png", use_container_width=True)
+        except Exception:
+            # if logo missing or invalid, don't crash the app
+            pass
+        st.markdown("---")
+
+        # Data (Upload)
+        st.header("Data")
+        uploaded = st.file_uploader("Upload your BDI DATA.xlsx", type=["xlsx"], key="uploader")
+
+        # Optional advanced parsing controls INSIDE Data (collapsed)
+        with st.expander("Advanced (Excel parsing)", expanded=False):
+            sheet_name = st.text_input("Sheet name", value=DEFAULT_SHEET, key="sheet_name")
+            auto_header = st.checkbox("Auto-detect header row", value=True, key="auto_header")
+            header_row_input = st.number_input(
+                "Header row (0-based, if not auto)",
+                min_value=0,
+                max_value=80,
+                value=1,
+                step=1,
+                disabled=auto_header,
+                key="header_row_input",
+            )
+
+        # Filters (Quick range) - enabled only AFTER data loaded
+        st.header("Filters (Quick range)")
+        quick = st.selectbox(
+            "Time",
+            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "MTD", "YTD", "All"],
+            index=0,
+            disabled=not st.session_state.data_loaded,
+            key="quick_range",
+        )
+
+        # Default page + Open page
+        st.header("Default page")
+        page = st.selectbox(
+            "Choose page",
+            ["Home", "Index", "TC Avg", "Vessel Group"],
+            index=0,
+            key="page_pick",
+        )
+
+        go = st.button("Open page", use_container_width=True, key="open_page_btn")
+
+    # -------------------------
+    # Route change only when click Open page
+    # Also: Load Excel only when click Open page (and uploaded exists)
+    # -------------------------
     if go:
         st.session_state.active_page = page
-        if page == "Vessel Group" and vessel_group_key is not None:
-            st.session_state.vessel_group_key = vessel_group_key
-            vessel_key = st.session_state.get("vessel_group_key", "CAPE")
 
+        # Only load data if uploaded exists
+        if uploaded is None:
+            st.session_state.data_loaded = False
+            st.session_state.df = None
+            st.session_state.all_metrics = None
+        else:
+            hdr = None if st.session_state.auto_header else int(st.session_state.header_row_input)
+            try:
+                df, raw_preview = load_excel(uploaded, sheet_name=st.session_state.sheet_name, header_row=hdr)
+                df = ensure_date(df, raw_preview).sort_values("DATE").reset_index(drop=True)
+
+                if df.empty:
+                    raise ValueError("No data rows after parsing.")
+
+                st.session_state.df = df
+                st.session_state.all_metrics = [c for c in df.columns if c != "DATE"]
+                st.session_state.data_loaded = True
+
+            except Exception as e:
+                st.session_state.data_loaded = False
+                st.session_state.df = None
+                st.session_state.all_metrics = None
+                st.warning("⚠️ Failed to load data. Please upload a valid .xlsx and check sheet/header settings.")
+                st.caption(f"Debug: {type(e).__name__}: {e}")
+
+    # -------------------------
+    # Always render HOME shell (only Title + Quick View)
+    # If no data loaded, don't crash; just show prompt.
+    # -------------------------
+    if not st.session_state.data_loaded or st.session_state.df is None:
+        render_home(None, None)
+        return
+
+    df = st.session_state.df
+    all_metrics = st.session_state.all_metrics
+
+    # Apply quick range (end always = last data date)
+    min_date = df["DATE"].min().date()
+    max_date = df["DATE"].max().date()
+    end_default = pd.Timestamp(max_date)
+    min_ts = pd.Timestamp(min_date)
+
+    start_ts = quick_range_start(quick, end_default, min_ts)
+    start_date = max(start_ts.date(), min_date)
+    end_date = max_date
+
+    dff = df[(df["DATE"].dt.date >= start_date) & (df["DATE"].dt.date <= end_date)].copy()
+    if dff.empty:
+        # still keep home clean
+        render_home(None, None)
+        st.info("No data in selected range. Try a broader quick range.")
+        return
+
+    # -------------------------
+    # Render active page
+    # -------------------------
     active = st.session_state.active_page
-    vessel_key = st.session_state.get("vessel_group_key", vessel_group_key)
 
-    # Render
     if active == "Home":
         render_home(dff, all_metrics)
+
     elif active == "Index":
-        render_index_page(dff, all_metrics, spread_on, vol_on, int(vol_window), show_yoy_mom)
+        render_index_page(dff, all_metrics)
+
     elif active == "TC Avg":
-        render_tc_page(dff, all_metrics, vol_on, int(vol_window), show_yoy_mom)
+        render_tc_page(dff, all_metrics)
+
     elif active == "Vessel Group":
-        render_vessel_group_page(dff, vessel_key)
+        # default vessel group key stored in session state
+        render_vessel_group_page(dff, st.session_state.vessel_group_key)
 
 
 if __name__ == "__main__":
