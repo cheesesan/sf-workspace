@@ -406,9 +406,6 @@ def main():
     with tabs[1]:
         st.markdown("### TC Avg")
         tc_cols = groups["TC Avg"]
-        if not tc_cols:
-            st.warning("No TC Avg-like columns detected (keywords: TC/4TC/5TC/AVG). You can still select any numeric columns below.")
-            tc_cols = all_metrics
 
         selected_tc = st.multiselect(
             "Select TC Avg series",
