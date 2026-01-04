@@ -30,6 +30,13 @@ VESSEL_LABELS = {
     "HANDY_38": "Handysize (38)",
 }
 
+def existing_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
+    """
+    Return only columns that actually exist in df.
+    Prevents KeyError / NameError when Excel headers differ.
+    """
+    return [c for c in cols if c in df.columns]
+
 def _clean_col_name(name: str) -> str:
     # Convert line breaks/tabs to spaces, then normalize spacing
     s = str(name).replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
