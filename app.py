@@ -315,6 +315,9 @@ def main():
 
     # Sidebar - Data
     with st.sidebar:
+        st.image("C:\Users\Rachel.Yao\Documents\GitHub\sf-workspace\SF_Logo.png", use_container_width=True,
+        )
+        st.markdown("---")
         st.header("Data")
         uploaded = st.file_uploader("Upload your BDI DATA.xlsx (optional)", type=["xlsx"])
         sheet_name = st.text_input("Sheet name", value=DEFAULT_SHEET)
