@@ -329,6 +329,84 @@ def plot_single(df: pd.DataFrame, y: str, title: str):
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
+def render_seasonality_compare(
+    df: pd.DataFrame,
+    col: str,
+    default_years: int = 3,
+    title_prefix: str = "Seasonality",
+    key_prefix: str = "season",
+):
+    """
+    Seasonality compare:
+    - x: Month (Jan..Dec)
+    - y: monthly average value
+    - line: Year
+    Years selectable.
+    """
+    if df is None or df.empty or col not in df.columns:
+        st.info("No data available for seasonality.")
+        return
+
+    tmp = df[["DATE", col]].dropna().copy()
+    if tmp.empty:
+        st.info("No valid data for seasonality.")
+        return
+
+    tmp["YEAR"] = tmp["DATE"].dt.year
+    tmp["MONTH"] = tmp["DATE"].dt.month
+
+    available_years = sorted(tmp["YEAR"].unique().tolist())
+    if not available_years:
+        st.info("No years found.")
+        return
+
+    # 默认选最近 N 年
+    default_sel = available_years[-default_years:] if len(available_years) >= default_years else available_years
+
+    show = st.checkbox(
+        "Show seasonality comparison (by month)",
+        value=True,
+        key=f"{key_prefix}_show_{col}",
+    )
+    if not show:
+        return
+
+    years_sel = st.multiselect(
+        "Choose years to compare",
+        options=available_years,
+        default=default_sel,
+        key=f"{key_prefix}_years_{col}",
+    )
+    if not years_sel:
+        st.info("Please select at least one year.")
+        return
+
+    tmp = tmp[tmp["YEAR"].isin(years_sel)].copy()
+
+    # monthly mean
+    agg = (
+        tmp.groupby(["YEAR", "MONTH"], as_index=False)[col]
+        .mean()
+        .rename(columns={col: "Value"})
+    )
+
+    # Month labels + ensure order Jan..Dec
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    agg["Month"] = agg["MONTH"].apply(lambda m: month_names[m-1])
+
+    fig = px.line(
+        agg,
+        x="Month",
+        y="Value",
+        color="YEAR",
+        markers=True,
+        category_orders={"Month": month_names},
+        title=f"{title_prefix}: {col} (Monthly Avg by Year)",
+    )
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10), legend_title_text="Year")
+    st.plotly_chart(fig, use_container_width=True)
+
+
 
 def quick_range_start(quick: str, end_date: pd.Timestamp, min_date: pd.Timestamp) -> pd.Timestamp:
     if quick == "All":
@@ -627,6 +705,24 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     )
     if selected_index:
         plot_multi_line(dff, selected_index, "Index series")
+        st.markdown("---")
+    st.subheader("Seasonality (Month-by-Month)")
+
+    season_base = st.selectbox(
+        "Choose a series for seasonality",
+        options=all_metrics,
+        index=all_metrics.index("BDI") if "BDI" in all_metrics else 0,
+        key="idx_season_base",
+    )
+
+    render_seasonality_compare(
+        dff,
+        col=season_base,
+        default_years=3,
+        title_prefix="Index Seasonality",
+        key_prefix="idx_season",
+    )
+
 
     # ---- Analytics controls (moved INSIDE the page) ----
     st.subheader("Analytics (choose a base series)")
@@ -688,6 +784,23 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     )
     if selected_tc:
         plot_multi_line(dff, selected_tc, "TC Avg series")
+        st.markdown("---")
+    st.subheader("Seasonality (Month-by-Month)")
+
+    season_tc = st.selectbox(
+        "Choose a TC series for seasonality",
+        options=selected_tc if selected_tc else all_metrics,
+        index=0,
+        key="tc_season_base",
+    )
+
+    render_seasonality_compare(
+        dff,
+        col=season_tc,
+        default_years=3,
+        title_prefix="TC Avg Seasonality",
+        key_prefix="tc_season",
+    )
 
     # ---- Analytics controls (moved INSIDE the page) ----
     st.subheader("Analytics (choose a base series)")
@@ -767,6 +880,23 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
         st.warning(f"No columns found for {vessel_label}.")
         st.write("Expected columns:", VESSEL_GROUPS[vessel_group_key])
         return
+        st.markdown("---")
+    st.subheader("Seasonality (Month-by-Month)")
+
+    season_route = st.selectbox(
+        "Choose one route for seasonality",
+        options=group_cols,
+        index=0,
+        key=f"vg_season_base_{vessel_group_key}",
+    )
+
+    render_seasonality_compare(
+        dff,
+        col=season_route,
+        default_years=3,
+        title_prefix=f"{vessel_label} Seasonality",
+        key_prefix=f"vg_season_{vessel_group_key}",
+    )
 
     # --- Plot series (as you already have) ---
     selected_routes = st.multiselect(
