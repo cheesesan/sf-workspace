@@ -633,6 +633,8 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
+vessel_group_key = st.session_state.get("vessel_group_key", "UNKNOWN")
+vessel_group_label = VESSEL_LABELS.get(vessel_group_key, vessel_group_key)
 render_contact_button(current_page=f"Vessel Group - {vessel_group_label}")
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
