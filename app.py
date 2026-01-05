@@ -485,6 +485,16 @@ render_contact_button(current_page="Home")
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest in range)")
+    if dff is None or dff.empty:
+        st.info("Please upload an Excel file and click Open page to load data.")
+        return
+
+    tmp = dff.dropna(subset=["DATE"]).sort_values("DATE")
+    if tmp.empty:
+        st.warning("No valid DATE rows in the selected range.")
+        return
+
+    latest_row = tmp.iloc[-1]
     latest_date = pd.to_datetime(latest_row["DATE"]).date()
     st.caption(f"As of: **{latest_date}**")
 
