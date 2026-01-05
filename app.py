@@ -785,7 +785,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     if selected_tc:
         plot_multi_line(dff, selected_tc, "TC Avg series")
         st.markdown("---")
-    st.subheader("Seasonality (Month-by-Month)")
+    st.subheader("Seasonality")
 
     season_tc = st.selectbox(
         "Choose a TC series for seasonality",
