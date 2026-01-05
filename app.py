@@ -957,11 +957,37 @@ def main():
         quick = st.selectbox(
             "Time",
             ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Past 3 Years",
-            "MTD", "YTD", "All"],
+            "MTD", "YTD", "All", "Custom"],
             index=0,
             disabled=not st.session_state.data_loaded,
             key="quick_range",
         )
+        # ✅ NEW: only show when Custom
+        custom_start = None
+        custom_end = None
+        if st.session_state.data_loaded and quick == "Custom":
+    # 这里的 min/max 要用“全量 df”日期范围，所以先安全取 session_state.df
+            _df0 = st.session_state.df
+            _min_d = _df0["DATE"].min().date()
+            _max_d = _df0["DATE"].max().date()
+
+            c1, c2 = st.columns(2)
+            with c1:
+                custom_start = st.date_input(
+                    "Start date",
+                    value=_min_d,
+                    min_value=_min_d,
+                    max_value=_max_d,
+                    key="custom_start",
+                )
+            with c2:
+                custom_end = st.date_input(
+                    "End date",
+                    value=_max_d,
+                    min_value=_min_d,
+                    max_value=_max_d,
+                    key="custom_end",
+                )
 
         # Default page + Open page
         st.header("Default page")
@@ -1023,9 +1049,19 @@ def main():
     end_default = pd.Timestamp(max_date)
     min_ts = pd.Timestamp(min_date)
 
-    start_ts = quick_range_start(quick, end_default, min_ts)
-    start_date = max(start_ts.date(), min_date)
-    end_date = max_date
+    if quick == "Custom":
+        # ✅ 用 sidebar 选择的日期
+        start_date = custom_start if custom_start else min_date
+        end_date = custom_end if custom_end else max_date
+
+        # ✅ 防呆：start > end 就交换，或你也可以直接 st.sidebar.error
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
+    else:
+        start_ts = quick_range_start(quick, end_default, min_ts)
+        start_date = max(start_ts.date(), min_date)
+        end_date = max_date
+
 
     dff = df[(df["DATE"].dt.date >= start_date) & (df["DATE"].dt.date <= end_date)].copy()
     if dff.empty:
