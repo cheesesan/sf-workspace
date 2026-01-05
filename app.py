@@ -655,7 +655,54 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest)")
-    
+    from ai.gemini import ask_gemini
+
+    st.markdown("---")
+    st.subheader("🤖 AI Market Summary")
+
+    q = st.text_area(
+        "Ask AI about the current market in this selected time range",
+        placeholder="e.g. Summarize today’s market tone in 3 bullet points.",
+        key="home_ai_q",
+    )
+
+    if st.button("Generate AI Summary", key="home_ai_btn"):
+        if dff is None or dff.empty:
+            st.warning("No data in current range.")
+        else:
+            latest = dff.iloc[-1]
+            asof = str(pd.to_datetime(latest["DATE"]).date())
+
+        # 你先喂最小事实：KPI + latest date
+            snapshot = {
+                "As of": asof,
+                "BDI": latest.get("BDI"),
+                "BPI": latest.get("BPI"),
+                "BCI": latest.get("BCI"),
+                "BSI": latest.get("BSI"),
+            }
+
+            prompt = f"""
+    You are a dry bulk shipping market analyst.
+    Use simple business language.
+
+    Data snapshot (latest in selected range):
+    {snapshot}
+
+    User question:
+    {q if q.strip() else "Give a concise market summary in 3 bullet points."}
+
+    Rules:
+    - Be concise
+    - No fake numbers (only interpret what is given)
+    - Mention market tone + risk (volatility) if relevant
+    """
+
+        with st.spinner("Gemini is thinking..."):
+            ans = ask_gemini(prompt)
+
+        st.markdown(ans)
+
     if dff is None or dff.empty:
         st.info("Please upload an Excel file and click Open page to load data.")
         return
@@ -785,7 +832,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     if selected_tc:
         plot_multi_line(dff, selected_tc, "TC Avg series")
         st.markdown("---")
-    st.subheader("Seasonality")
+    st.subheader("Seasonality (Month-by-Month)")
 
     season_tc = st.selectbox(
         "Choose a TC series for seasonality",
