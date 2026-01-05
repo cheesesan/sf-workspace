@@ -16,6 +16,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+import os
+load_dotenv() 
 
 
 APP_TITLE = "BDI Dashboard"
@@ -655,6 +658,27 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest)")
+    
+    if dff is None or dff.empty:
+        st.info("Please upload an Excel file and click Open page to load data.")
+        return
+
+    tmp = dff.dropna(subset=["DATE"]).sort_values("DATE")
+    if tmp.empty:
+        st.warning("No valid DATE rows in the selected range.")
+        return
+
+    latest_row = tmp.iloc[-1]
+    latest_date = pd.to_datetime(latest_row["DATE"]).date()
+    st.caption(f"As of: **{latest_date}**")
+
+
+    if dff is None or dff.empty:
+        st.info("📄 Please upload **BDI DATA.xlsx** from the sidebar, then click **Open page**.")
+        return
+
+    latest = dff.iloc[-1]
+    prev = dff.iloc[-2] if len(dff) >= 2 else None
     from ai.gemini import ask_gemini
 
     st.markdown("---")
@@ -702,27 +726,6 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
             ans = ask_gemini(prompt)
 
         st.markdown(ans)
-
-    if dff is None or dff.empty:
-        st.info("Please upload an Excel file and click Open page to load data.")
-        return
-
-    tmp = dff.dropna(subset=["DATE"]).sort_values("DATE")
-    if tmp.empty:
-        st.warning("No valid DATE rows in the selected range.")
-        return
-
-    latest_row = tmp.iloc[-1]
-    latest_date = pd.to_datetime(latest_row["DATE"]).date()
-    st.caption(f"As of: **{latest_date}**")
-
-
-    if dff is None or dff.empty:
-        st.info("📄 Please upload **BDI DATA.xlsx** from the sidebar, then click **Open page**.")
-        return
-
-    latest = dff.iloc[-1]
-    prev = dff.iloc[-2] if len(dff) >= 2 else None
 
     kpi_candidates = [c for c in ["BDI", "BPI", "BCI", "BSI", "BHSI"] if c in dff.columns]
     if not kpi_candidates and all_metrics:
