@@ -663,7 +663,7 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
             mom = f"{base_series}_mchg"
             yoy = f"{base_series}_ychg"
             tmp = analytics_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
-            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
+            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change")
 
     st.subheader("BDI DATA (table)")
     table_cols = st.multiselect(
@@ -724,7 +724,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
             mom = f"{base_tc}_mchg"
             yoy = f"{base_tc}_ychg"
             tmp = tc_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
-            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change (absolute)")
+            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change")
 
     st.subheader("TC DATA (table)")
     table_cols = st.multiselect(
@@ -956,7 +956,8 @@ def main():
         st.header("Filters (Quick range)")
         quick = st.selectbox(
             "Time",
-            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "MTD", "YTD", "All"],
+            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Past 3 Years"
+            "MTD", "YTD", "All"],
             index=0,
             disabled=not st.session_state.data_loaded,
             key="quick_range",
