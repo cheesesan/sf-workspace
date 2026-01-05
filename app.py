@@ -199,16 +199,21 @@ def central_band_bounds_by_year(df: pd.DataFrame, col: str, cover: float) -> pd.
     low = q((1-cover)/2), high = q(1-(1-cover)/2)
     """
     tmp = df[["DATE", col]].dropna().copy()
-    tmp["YEAR"] = _year_col(tmp)
+    tmp["YEAR"] = tmp["DATE"].dt.year
+
     a = (1 - cover) / 2.0
     b = 1 - a
 
-    def _bounds(x: pd.Series):
-        return pd.Series({"LOW": x.quantile(a), "HIGH": x.quantile(b)})
+    g = tmp.groupby("YEAR")[col]
+    out = pd.DataFrame({
+        "YEAR": g.apply(lambda s: s.name).index,  # YEAR index
+        "LOW": g.quantile(a).values,
+        "HIGH": g.quantile(b).values,
+    })
 
-    out = tmp.groupby("YEAR")[col].apply(_bounds).reset_index()
     out["COVER"] = int(cover * 100)
     return out
+
 
 def contiguous_intervals(dates: pd.Series, mask: pd.Series) -> list[dict]:
     """
