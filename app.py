@@ -138,7 +138,12 @@ def render_contact_button(current_page: str):
     # Right-top area
     top_left, top_right = st.columns([0.8, 0.2])
     with top_right:
-        if st.button("Contact", use_container_width=True):
+        if st.button(
+            "Contact",
+            use_container_width=True,
+            key=f"contact_btn_{current_page}"
+    ):
+
             st.session_state["show_contact"] = True
 
     if "show_contact" not in st.session_state:
