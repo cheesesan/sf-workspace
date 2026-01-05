@@ -956,7 +956,7 @@ def main():
         st.header("Filters (Quick range)")
         quick = st.selectbox(
             "Time",
-            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Past 3 Years"
+            ["Past Week", "Past Month", "Past 3 Months", "Past 6 Months", "Past Year", "Past 2 Years", "Past 3 Years",
             "MTD", "YTD", "All"],
             index=0,
             disabled=not st.session_state.data_loaded,
