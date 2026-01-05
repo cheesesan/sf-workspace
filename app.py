@@ -496,8 +496,6 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
     st.markdown("#### Routes")
-    if asof:
-        st.caption(f"As of: {asof}")
 
     keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
     cols = st.columns(len(keys_in_order), gap="small")
