@@ -10,6 +10,13 @@ import yaml
 import bcrypt
 from pathlib import Path
 
+import os
+import csv
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+
 
 APP_TITLE = "BDI Dashboard"
 DEFAULT_XLSX_PATH = Path("data") / "BDI DATA.xlsx"
@@ -72,6 +79,108 @@ def require_login() -> None:
             st.error("Invalid username or password.")
 
     st.stop()
+# =========================
+# Contact / Feedback
+# =========================
+FEEDBACK_DIR = Path("feedback")
+FEEDBACK_DIR.mkdir(exist_ok=True)
+FEEDBACK_CSV = FEEDBACK_DIR / "feedback.csv"
+
+def save_feedback(
+    user: dict | None,
+    page: str,
+    subject: str,
+    message: str,
+    uploaded_files: list,
+) -> str:
+    """
+    Save feedback to feedback/feedback.csv and store attachments under feedback/uploads/<id>/
+    Return feedback_id.
+    """
+    feedback_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    upload_dir = FEEDBACK_DIR / "uploads" / feedback_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    attachments = []
+    for f in uploaded_files or []:
+        # Streamlit UploadedFile: has .name and .getbuffer()
+        safe_name = f.name.replace("/", "_").replace("\\", "_")
+        out_path = upload_dir / safe_name
+        with open(out_path, "wb") as w:
+            w.write(f.getbuffer())
+        attachments.append(str(out_path))
+
+    row = {
+        "feedback_id": feedback_id,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "username": (user or {}).get("username", ""),
+        "display_name": (user or {}).get("name", ""),
+        "page": page,
+        "subject": subject.strip(),
+        "message": message.strip(),
+        "attachments": ";".join(attachments),
+    }
+
+    # write header if new
+    file_exists = FEEDBACK_CSV.exists()
+    with open(FEEDBACK_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+    return feedback_id
+
+def render_contact_button(current_page: str):
+    """
+    Show a right-top Contact button that opens a modal dialog.
+    """
+    # Right-top area
+    top_left, top_right = st.columns([0.8, 0.2])
+    with top_right:
+        if st.button("Contact", use_container_width=True):
+            st.session_state["show_contact"] = True
+
+    if "show_contact" not in st.session_state:
+        st.session_state["show_contact"] = False
+
+    if st.session_state["show_contact"]:
+        with st.modal("Contact / Feedback"):
+            st.write("Send feedback to the dashboard owner (you).")
+
+            user = st.session_state.get("user", None)
+            if user:
+                st.caption(f"Signed in as: **{user.get('name','')}**")
+
+            subject = st.text_input("Subject", placeholder="e.g., Bug report / Feature request / Data issue")
+            message = st.text_area("Message", height=160, placeholder="Describe what you saw and what you expected...")
+
+            files = st.file_uploader(
+                "Optional: attach screenshots/files",
+                accept_multiple_files=True
+            )
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                submitted = st.button("Submit", type="primary", use_container_width=True)
+            with col_b:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state["show_contact"] = False
+                    st.rerun()
+
+            if submitted:
+                if not message.strip():
+                    st.error("Please enter a message.")
+                else:
+                    fid = save_feedback(
+                        user=user,
+                        page=current_page,
+                        subject=subject or "(no subject)",
+                        message=message,
+                        uploaded_files=files,
+                    )
+                    st.success(f"Thanks! Feedback received. (ID: {fid})")
+                    st.session_state["show_contact"] = False
 
 # -------------------------
 # Vessel groups
@@ -365,9 +474,13 @@ def format_interval_table(df_int: pd.DataFrame) -> pd.DataFrame:
 # -------------------------
 # Pages
 # -------------------------
+render_contact_button(current_page="Home")
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest in range)")
+    latest_date = pd.to_datetime(latest_row["DATE"]).date()
+    st.caption(f"As of: **{latest_date}**")
+
 
     if dff is None or dff.empty:
         st.info("📄 Please upload **BDI DATA.xlsx** from the sidebar, then click **Open page**.")
@@ -391,7 +504,7 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
             else:
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
 
-
+render_contact_button(current_page="Index")
 def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
 
@@ -453,7 +566,7 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
-
+render_contact_button(current_page="TC Avg")
 def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("TC Avg")
 
@@ -515,7 +628,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
-
+render_contact_button(current_page=f"Vessel Group - {vessel_group_label}")
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
