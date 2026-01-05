@@ -133,45 +133,37 @@ def save_feedback(
 
 def render_contact_button(current_page: str):
     """
-    Show a right-top Contact button that opens a modal dialog.
+    Right-top Contact popover (no st.modal; stable on Streamlit)
     """
-    # Right-top area
-    top_left, top_right = st.columns([0.8, 0.2])
-    with top_right:
-        if st.button(
-            "Contact",
-            use_container_width=True,
-            key=f"contact_btn_topright_{current_page}"
-    ):
-
-            st.session_state["show_contact"] = True
-
-    if "show_contact" not in st.session_state:
-        st.session_state["show_contact"] = False
-
-    if st.session_state["show_contact"]:
-        with st.modal("Contact / Feedback"):
-            st.write("Send feedback to the dashboard owner (you).")
+    # 把按钮放在右上角：用 columns 把它挤到右边
+    _, col_right = st.columns([0.82, 0.18])
+    with col_right:
+        with st.popover("Contact", use_container_width=True):
+            st.write("Send feedback to the dashboard owner (Rachel).")
 
             user = st.session_state.get("user", None)
             if user:
                 st.caption(f"Signed in as: **{user.get('name','')}**")
 
-            subject = st.text_input("Subject", placeholder="e.g., Bug report / Feature request / Data issue")
-            message = st.text_area("Message", height=160, placeholder="Describe what you saw and what you expected...")
+            with st.form(key=f"contact_form_{current_page}"):
+                subject = st.text_input(
+                    "Subject",
+                    placeholder="e.g., Bug report / Feature request / Data issue",
+                    key=f"contact_subject_{current_page}",
+                )
+                message = st.text_area(
+                    "Message",
+                    height=160,
+                    placeholder="Describe what you saw and what you expected...",
+                    key=f"contact_msg_{current_page}",
+                )
+                files = st.file_uploader(
+                    "Optional: attach screenshots/files",
+                    accept_multiple_files=True,
+                    key=f"contact_files_{current_page}",
+                )
 
-            files = st.file_uploader(
-                "Optional: attach screenshots/files",
-                accept_multiple_files=True
-            )
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                submitted = st.button("Submit", type="primary", use_container_width=True)
-            with col_b:
-                if st.button("Cancel", use_container_width=True):
-                    st.session_state["show_contact"] = False
-                    st.rerun()
+                submitted = st.form_submit_button("Submit", type="primary")
 
             if submitted:
                 if not message.strip():
@@ -185,9 +177,7 @@ def render_contact_button(current_page: str):
                         uploaded_files=files,
                     )
                     st.success(f"Thanks! Feedback received. (ID: {fid})")
-                    st.session_state["show_contact"] = False
-if st.session_state.get("authenticated", False):
-    render_contact_button(current_page=current_page)
+
 
 # -------------------------
 # Vessel groups
