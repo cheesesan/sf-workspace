@@ -576,7 +576,7 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
 # -------------------------
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
-    st.subheader("Quick view (latest in range)")
+    st.subheader("Quick view (latest)")
     
     if dff is None or dff.empty:
         st.info("Please upload an Excel file and click Open page to load data.")
