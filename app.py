@@ -491,20 +491,34 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
     if dff is None or dff.empty:
         return
 
-    # latest row（在你当前 quick range 过滤后的范围内）
     latest = dff.iloc[-1]
     asof = pd.to_datetime(latest["DATE"]).date() if "DATE" in dff.columns else None
-
-    # prev row（用于计算 change）
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
     st.markdown("### Markets (latest routes)")
     if asof:
         st.caption(f"As of: {asof}")
 
-    # 五列布局（CAPE/KMX/PMX/SMX/HANDY）
     keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
     cols = st.columns(len(keys_in_order), gap="small")
+
+    def _fmt_2(v):
+        """只用于 Markets snapshot：千分位 + 两位小数；缺失显示 —"""
+        if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+            return "—"
+        try:
+            return f"{float(v):,.2f}"
+        except Exception:
+            return "—"
+
+    def _fmt_chg_2(v):
+        """变化值：带符号 + 两位小数；缺失空"""
+        if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+            return ""
+        try:
+            return f"{float(v):+,.2f}"
+        except Exception:
+            return ""
 
     for ui_col, gkey in zip(cols, keys_in_order):
         label = vessel_labels.get(gkey, gkey)
@@ -516,10 +530,10 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
             rows = []
             for r in routes:
                 v = latest.get(r, None)
+
                 dv = None
                 if prev is not None:
                     pv = prev.get(r, None)
-                    # 只有两天都有值才算 change
                     if pd.notna(v) and pd.notna(pv):
                         try:
                             dv = float(v) - float(pv)
@@ -529,27 +543,26 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
                 rows.append(
                     {
                         "Route": r,
-                        "Value": _fmt_num(v),
-                        "Chg": "" if dv is None else f"{dv:+.0f}",
+                        "Value": _fmt_2(v),          # ✅ 两位小数
+                        "Chg": _fmt_chg_2(dv),       # ✅ 两位小数（带符号）
                         "_chg_val": 0 if dv is None else dv,
                     }
                 )
 
             df_show = pd.DataFrame(rows)
 
-            # 用 dataframe + 样式做出红绿变化（类似图1）
             def _style_chg(val):
+                # val 现在是字符串 "+1,234.56"，我们需要转回 float 来上色
                 try:
-                    v = float(val)
+                    v = float(str(val).replace(",", ""))
                 except Exception:
                     return ""
                 if v > 0:
-                    return "color: #16a34a; font-weight: 600;"  # green
+                    return "color: #16a34a; font-weight: 600;"
                 if v < 0:
-                    return "color: #dc2626; font-weight: 600;"  # red
+                    return "color: #dc2626; font-weight: 600;"
                 return "color: #6b7280;"
 
-            # 只显示 Route/Value/Chg
             styled = df_show[["Route", "Value", "Chg"]].style.applymap(_style_chg, subset=["Chg"])
 
             st.dataframe(
@@ -558,6 +571,7 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
                 hide_index=True,
                 height=min(36 * (len(routes) + 1), 420),
             )
+
 
 # -------------------------
 # Pages
