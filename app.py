@@ -495,7 +495,7 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
     asof = pd.to_datetime(latest["DATE"]).date() if "DATE" in dff.columns else None
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
-    st.markdown("### Markets (latest routes)")
+    st.markdown("#### Routes")
     if asof:
         st.caption(f"As of: {asof}")
 
