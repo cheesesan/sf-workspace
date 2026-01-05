@@ -183,6 +183,117 @@ def quick_range_start(quick: str, end_date: pd.Timestamp, min_date: pd.Timestamp
         return end_date - pd.DateOffset(years=2)
     return min_date
 
+def _year_col(df: pd.DataFrame) -> pd.Series:
+    return df["DATE"].dt.year
+
+def compute_yearly_mean_std(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    tmp = df[["DATE", col]].dropna().copy()
+    tmp["YEAR"] = _year_col(tmp)
+    out = tmp.groupby("YEAR")[col].agg(["mean", "std", "count"]).reset_index()
+    out = out.rename(columns={"mean": "AVG", "std": "STD", "count": "N"})
+    return out
+
+def central_band_bounds_by_year(df: pd.DataFrame, col: str, cover: float) -> pd.DataFrame:
+    """
+    cover=0.50/0.60/0.75 -> central coverage interval:
+    low = q((1-cover)/2), high = q(1-(1-cover)/2)
+    """
+    tmp = df[["DATE", col]].dropna().copy()
+    tmp["YEAR"] = _year_col(tmp)
+    a = (1 - cover) / 2.0
+    b = 1 - a
+
+    def _bounds(x: pd.Series):
+        return pd.Series({"LOW": x.quantile(a), "HIGH": x.quantile(b)})
+
+    out = tmp.groupby("YEAR")[col].apply(_bounds).reset_index()
+    out["COVER"] = int(cover * 100)
+    return out
+
+def contiguous_intervals(dates: pd.Series, mask: pd.Series) -> list[dict]:
+    """
+    Given boolean mask aligned with dates, return contiguous True intervals.
+    """
+    if len(dates) == 0:
+        return []
+    m = mask.fillna(False).to_numpy()
+    d = pd.to_datetime(dates).to_numpy()
+
+    intervals = []
+    start = None
+    for i, flag in enumerate(m):
+        if flag and start is None:
+            start = i
+        if (not flag) and start is not None:
+            intervals.append({"start_time": pd.Timestamp(d[start]), "end_time": pd.Timestamp(d[i-1])})
+            start = None
+    if start is not None:
+        intervals.append({"start_time": pd.Timestamp(d[start]), "end_time": pd.Timestamp(d[len(m)-1])})
+
+    # add duration days
+    for it in intervals:
+        it["days"] = (it["end_time"] - it["start_time"]).days + 1
+    return intervals
+
+def intervals_for_value_range(df: pd.DataFrame, col: str, low: float, high: float) -> pd.DataFrame:
+    tmp = df[["DATE", col]].dropna().copy()
+    m = (tmp[col] > low) & (tmp[col] <= high)
+    intervals = contiguous_intervals(tmp["DATE"], m)
+    if not intervals:
+        return pd.DataFrame(columns=["range", "start_time", "end_time", "days"])
+    out = pd.DataFrame(intervals)
+    out.insert(0, "range", f"({low:.3f}, {high:.3f}]")
+    return out
+
+def bins_and_intervals_for_year(df: pd.DataFrame, col: str, year: int, n_bins: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    For a specific year:
+    - Build equal-width bins
+    - Histogram counts
+    - For each bin, find contiguous time intervals
+    """
+    tmp = df[["DATE", col]].dropna().copy()
+    tmp = tmp[tmp["DATE"].dt.year == year]
+    if tmp.empty:
+        return pd.DataFrame(), pd.DataFrame(columns=["range", "start_time", "end_time", "days"])
+
+    vmin, vmax = float(tmp[col].min()), float(tmp[col].max())
+    if np.isclose(vmin, vmax):
+        # degenerate
+        hist = pd.DataFrame({"bin": [f"[{vmin:.3f}, {vmax:.3f}]"], "count": [len(tmp)]})
+        intervals = pd.DataFrame([{
+            "range": f"[{vmin:.3f}, {vmax:.3f}]",
+            "start_time": tmp["DATE"].min(),
+            "end_time": tmp["DATE"].max(),
+            "days": (tmp["DATE"].max() - tmp["DATE"].min()).days + 1
+        }])
+        return hist, intervals
+
+    edges = np.linspace(vmin, vmax, n_bins + 1)
+    cats = pd.cut(tmp[col], bins=edges, include_lowest=True, right=True)
+    hist = cats.value_counts().sort_index().reset_index()
+    hist.columns = ["bin", "count"]
+    hist["bin"] = hist["bin"].astype(str)
+
+    all_intervals = []
+    # build mask per bin and extract contiguous intervals
+    for i in range(n_bins):
+        low, high = edges[i], edges[i+1]
+        interval_df = intervals_for_value_range(tmp, col, low, high)
+        if not interval_df.empty:
+            all_intervals.append(interval_df)
+
+    intervals = pd.concat(all_intervals, ignore_index=True) if all_intervals else pd.DataFrame(columns=["range", "start_time", "end_time", "days"])
+    intervals = intervals.sort_values(["start_time"]).reset_index(drop=True)
+    return hist, intervals
+
+def format_interval_table(df_int: pd.DataFrame) -> pd.DataFrame:
+    if df_int.empty:
+        return df_int
+    out = df_int.copy()
+    out["start_time"] = pd.to_datetime(out["start_time"]).dt.date
+    out["end_time"] = pd.to_datetime(out["end_time"]).dt.date
+    return out
 
 # -------------------------
 # Pages
@@ -341,7 +452,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
-    # Choose vessel INSIDE the page
+    # --- Choose vessel INSIDE the page ---
     key_to_label = VESSEL_LABELS
     labels = list(key_to_label.values())
     default_label = key_to_label.get(vessel_group_key, labels[0])
@@ -353,10 +464,13 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
         index=default_index,
         key="vg_radio",
     )
+
     label_to_key = {v: k for k, v in key_to_label.items()}
     vessel_group_key = label_to_key[vessel_label]
+    st.session_state.vessel_group_key = vessel_group_key  # remember choice
 
     group_cols = existing_cols(dff, VESSEL_GROUPS[vessel_group_key])
+
     st.subheader(vessel_label)
 
     if not group_cols:
@@ -364,6 +478,7 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
         st.write("Expected columns:", VESSEL_GROUPS[vessel_group_key])
         return
 
+    # --- Plot series (as you already have) ---
     selected_routes = st.multiselect(
         "Select series",
         options=group_cols,
@@ -373,6 +488,113 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     if selected_routes:
         plot_multi_line(dff, selected_routes, f"{vessel_label} series")
 
+    # =========================================================
+    # Analytics (NEW) — match your Excel/fig logic
+    # =========================================================
+    st.markdown("---")
+    st.subheader("Analytics (annual stats + distribution intervals)")
+
+    # pick ONE route for analytics
+    route = st.selectbox(
+        "Pick one route / leg for analytics",
+        options=group_cols,
+        index=0,
+        key=f"vg_route_pick_{vessel_group_key}",
+    )
+
+    base = dff[["DATE", route]].dropna().copy()
+    if base.empty:
+        st.info("No data for the selected route in the current time range.")
+        return
+
+    # ---- summary box (like your example) ----
+    start_dt = base["DATE"].min().date()
+    end_dt = base["DATE"].max().date()
+    total_days = (base["DATE"].max() - base["DATE"].min()).days + 1
+    st.caption(f"Route: **{route}** | Start: **{start_dt}** | End: **{end_dt}** | Total time: **{total_days} days**")
+
+    # ---- 1) yearly average & std ----
+    yearly = compute_yearly_mean_std(base, route)
+    if yearly.empty:
+        st.info("Not enough data to compute yearly stats.")
+        return
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        long = yearly.melt(id_vars=["YEAR"], value_vars=["AVG", "STD"], var_name="Metric", value_name="Value")
+        fig = px.line(long, x="YEAR", y="Value", color="Metric", title="Annual average & std")
+        fig.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=10), legend_title_text="")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.dataframe(yearly, use_container_width=True, height=360)
+
+    # ---- 2) central coverage bands: 50% / 60% / 75% ----
+    bands = []
+    for cover in [0.50, 0.60, 0.75]:
+        bands.append(central_band_bounds_by_year(base, route, cover))
+    band_df = pd.concat(bands, ignore_index=True)
+
+    # reshape for plotting upper/lower by year & cover
+    band_long = band_df.melt(id_vars=["YEAR", "COVER"], value_vars=["LOW", "HIGH"], var_name="Bound", value_name="Value")
+    band_long["Series"] = band_long["COVER"].astype(str) + "% " + band_long["Bound"]
+
+    fig_band = px.line(
+        band_long,
+        x="YEAR",
+        y="Value",
+        color="Series",
+        title="Central coverage bands by year (50% / 60% / 75%)",
+    )
+    fig_band.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10), legend_title_text="")
+    st.plotly_chart(fig_band, use_container_width=True)
+
+    # ---- 3) choose a year -> histogram + value-range time intervals ----
+    years = sorted(base["DATE"].dt.year.unique().tolist())
+    year_pick = st.selectbox("Year", options=years, index=len(years) - 1, key=f"vg_year_{vessel_group_key}_{route}")
+
+    bins = st.slider("Number of bins", min_value=6, max_value=20, value=10, step=1, key=f"vg_bins_{vessel_group_key}_{route}")
+
+    hist, intervals = bins_and_intervals_for_year(base, route, year_pick, n_bins=int(bins))
+
+    c3, c4 = st.columns([2, 1])
+    with c3:
+        if not hist.empty:
+            fig_h = px.bar(hist, x="bin", y="count", title="Distribution (by value ranges)")
+            fig_h.update_layout(height=360, margin=dict(l=10, r=10, t=50, b=10))
+            fig_h.update_xaxes(tickangle=45)
+            st.plotly_chart(fig_h, use_container_width=True)
+        else:
+            st.info("No data for this year.")
+
+    with c4:
+        st.write("Intervals (continuous ranges)")
+        it = format_interval_table(intervals)
+        if it.empty:
+            st.caption("No continuous intervals found.")
+        else:
+            # show a compact table (top 30)
+            st.dataframe(it.head(30), use_container_width=True, height=360)
+
+    # Optional: show continuous intervals for the 50/60/75 bands in the chosen year
+    st.markdown("### Continuous intervals inside central bands (selected year)")
+    band_year = band_df[band_df["YEAR"] == year_pick].copy()
+    if band_year.empty:
+        st.caption("No band data for the selected year.")
+    else:
+        for cover in [50, 60, 75]:
+            row = band_year[band_year["COVER"] == cover]
+            if row.empty:
+                continue
+            low, high = float(row["LOW"].iloc[0]), float(row["HIGH"].iloc[0])
+            tmp_year = base[base["DATE"].dt.year == year_pick].copy()
+            band_intervals = intervals_for_value_range(tmp_year, route, low, high)
+            st.write(f"**{cover}% band**: ({low:.3f}, {high:.3f}]")
+            st.dataframe(format_interval_table(band_intervals).head(20), use_container_width=True)
+
+    # =========================================================
+    # Original table
+    # =========================================================
     st.subheader("Data table")
     table_cols = st.multiselect(
         "Table columns",
@@ -383,7 +605,6 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     tbl = dff[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
-    st.session_state.vessel_group_key = vessel_group_key
 
 
 # -------------------------
