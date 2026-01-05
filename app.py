@@ -141,7 +141,7 @@ def render_contact_button(current_page: str):
         if st.button(
             "Contact",
             use_container_width=True,
-            key=f"contact_btn_{current_page}"
+            key=f"contact_btn_topright_{current_page}"
     ):
 
             st.session_state["show_contact"] = True
@@ -481,7 +481,6 @@ def format_interval_table(df_int: pd.DataFrame) -> pd.DataFrame:
 # -------------------------
 # Pages
 # -------------------------
-render_contact_button(current_page="Home")
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest in range)")
