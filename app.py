@@ -601,7 +601,7 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
                 cols[i].metric(name, f"{val:,.0f}")
             else:
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
-    render_markets_snapshot(dff, vessel_groups, VESSEL_LABELS)            
+    render_markets_snapshot(dff, VESSEL_GROUPS, VESSEL_LABELS)            
 
 def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
