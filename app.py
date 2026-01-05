@@ -186,6 +186,8 @@ def render_contact_button(current_page: str):
                     )
                     st.success(f"Thanks! Feedback received. (ID: {fid})")
                     st.session_state["show_contact"] = False
+if st.session_state.get("authenticated", False):
+    render_contact_button(current_page=current_page)
 
 # -------------------------
 # Vessel groups
@@ -509,7 +511,6 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
             else:
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
 
-render_contact_button(current_page="Index")
 def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
 
@@ -571,7 +572,6 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
-render_contact_button(current_page="TC Avg")
 def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("TC Avg")
 
@@ -635,7 +635,6 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
 
 vessel_group_key = st.session_state.get("vessel_group_key", "UNKNOWN")
 vessel_group_label = VESSEL_LABELS.get(vessel_group_key, vessel_group_key)
-render_contact_button(current_page=f"Vessel Group - {vessel_group_label}")
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
@@ -909,7 +908,7 @@ def main():
     if not st.session_state.data_loaded or st.session_state.df is None:
         render_home(None, None)
         return
-
+    
     df = st.session_state.df
     all_metrics = st.session_state.all_metrics
 
@@ -934,6 +933,9 @@ def main():
     # Render active page
     # -------------------------
     active = st.session_state.active_page
+    current_page = st.session_state.get("active_page", "Home")  
+    render_contact_button(current_page=current_page)
+
 
     if active == "Home":
         render_home(dff, all_metrics)
