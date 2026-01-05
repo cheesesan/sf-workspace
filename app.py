@@ -349,6 +349,8 @@ def quick_range_start(quick: str, end_date: pd.Timestamp, min_date: pd.Timestamp
         return end_date - pd.DateOffset(years=1)
     if quick == "Past 2 Years":
         return end_date - pd.DateOffset(years=2)
+    if quick == "Past 3 Years":
+        return end_date - pd.DateOffset(years=3)
     return min_date
 
 def _year_col(df: pd.DataFrame) -> pd.Series:
@@ -468,12 +470,102 @@ def format_interval_table(df_int: pd.DataFrame) -> pd.DataFrame:
     out["end_time"] = pd.to_datetime(out["end_time"]).dt.date
     return out
 
+import pandas as pd
+import streamlit as st
+
+def _fmt_num(x):
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ""
+    try:
+        # 你 routes 有的像 $/tonne, 有的像 index，先统一显示到整数
+        return f"{float(x):,.0f}"
+    except Exception:
+        return str(x)
+
+def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_labels: dict):
+    """
+    在 Home 页面展示类似 Breamar 的 Markets Snapshot:
+    - 每个船型一列
+    - 列内展示 routes 的最新值 + (可选) 日变化
+    """
+    if dff is None or dff.empty:
+        return
+
+    # latest row（在你当前 quick range 过滤后的范围内）
+    latest = dff.iloc[-1]
+    asof = pd.to_datetime(latest["DATE"]).date() if "DATE" in dff.columns else None
+
+    # prev row（用于计算 change）
+    prev = dff.iloc[-2] if len(dff) >= 2 else None
+
+    st.markdown("### Markets (latest routes)")
+    if asof:
+        st.caption(f"As of: {asof}")
+
+    # 五列布局（CAPE/KMX/PMX/SMX/HANDY）
+    keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
+    cols = st.columns(len(keys_in_order), gap="small")
+
+    for ui_col, gkey in zip(cols, keys_in_order):
+        label = vessel_labels.get(gkey, gkey)
+        routes = vessel_groups.get(gkey, [])
+
+        with ui_col:
+            st.markdown(f"**{label}**")
+
+            rows = []
+            for r in routes:
+                v = latest.get(r, None)
+                dv = None
+                if prev is not None:
+                    pv = prev.get(r, None)
+                    # 只有两天都有值才算 change
+                    if pd.notna(v) and pd.notna(pv):
+                        try:
+                            dv = float(v) - float(pv)
+                        except Exception:
+                            dv = None
+
+                rows.append(
+                    {
+                        "Route": r,
+                        "Value": _fmt_num(v),
+                        "Chg": "" if dv is None else f"{dv:+.0f}",
+                        "_chg_val": 0 if dv is None else dv,
+                    }
+                )
+
+            df_show = pd.DataFrame(rows)
+
+            # 用 dataframe + 样式做出红绿变化（类似图1）
+            def _style_chg(val):
+                try:
+                    v = float(val)
+                except Exception:
+                    return ""
+                if v > 0:
+                    return "color: #16a34a; font-weight: 600;"  # green
+                if v < 0:
+                    return "color: #dc2626; font-weight: 600;"  # red
+                return "color: #6b7280;"
+
+            # 只显示 Route/Value/Chg
+            styled = df_show[["Route", "Value", "Chg"]].style.applymap(_style_chg, subset=["Chg"])
+
+            st.dataframe(
+                styled,
+                use_container_width=True,
+                hide_index=True,
+                height=min(36 * (len(routes) + 1), 420),
+            )
+
 # -------------------------
 # Pages
 # -------------------------
 def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     st.title("BDI Dashboard")
     st.subheader("Quick view (latest in range)")
+    
     if dff is None or dff.empty:
         st.info("Please upload an Excel file and click Open page to load data.")
         return
@@ -509,6 +601,7 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
                 cols[i].metric(name, f"{val:,.0f}")
             else:
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
+    render_markets_snapshot(dff, vessel_groups, VESSEL_LABELS)            
 
 def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
