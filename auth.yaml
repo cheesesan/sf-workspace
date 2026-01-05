@@ -1,0 +1,7 @@
+users:
+  rachel:
+    name: "Rachel"
+    password_hash: "$2b$12$GhSIk2i7ymcDR3DYOSj7gu8nRptIN6/5hQ.T8dTaJZzyBE/olGvuq"
+  boss:
+    name: "Others"
+    password_hash: "$2b$12$GhSIk2i7ymcDR3DYOSj7gu8nRptIN6/5hQ.T8dTaJZzyBE/olGvuq"

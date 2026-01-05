@@ -6,10 +6,72 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
+import yaml
+import bcrypt
+from pathlib import Path
+
+
 APP_TITLE = "BDI Dashboard"
 DEFAULT_XLSX_PATH = Path("data") / "BDI DATA.xlsx"
 DEFAULT_SHEET = "BDI INDEX"
 
+# =========================
+# Auth (username/password)
+# =========================
+AUTH_FILE = Path("auth.yaml")
+
+def load_auth() -> dict:
+    if not AUTH_FILE.exists():
+        return {"users": {}}
+    with AUTH_FILE.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if "users" not in data:
+        data["users"] = {}
+    return data
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+def logout():
+    st.session_state["authed"] = False
+    st.session_state.pop("user", None)
+
+def require_login() -> None:
+    # init session
+    if "authed" not in st.session_state:
+        st.session_state["authed"] = False
+
+    # already logged in
+    if st.session_state["authed"]:
+        return
+
+    # login UI
+    st.set_page_config(page_title="BDI Dashboard", layout="wide")
+    st.title("BDI Dashboard")
+    st.caption("Please sign in to continue.")
+
+    auth = load_auth()
+    users = auth.get("users", {})
+
+    with st.form("login_form", clear_on_submit=False):
+        username = st.text_input("Username", placeholder="e.g., rachel")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+
+    if submitted:
+        u = users.get(username)
+        if u and verify_password(password, u.get("password_hash", "")):
+            st.session_state["authed"] = True
+            st.session_state["user"] = {"username": username, "name": u.get("name", username)}
+            st.success(f"Welcome, {st.session_state['user']['name']}!")
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
+
+    st.stop()
 
 # -------------------------
 # Vessel groups
@@ -616,6 +678,7 @@ def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
 # Main
 # -------------------------
 def main():
+    require_login()
     st.set_page_config(page_title=APP_TITLE, layout="wide")
 
     # Init session state
@@ -633,6 +696,12 @@ def main():
     # -------------------------
     # Sidebar: ONLY Logo / Data / Filters / Default page + Open page
     # -------------------------
+    with st.sidebar:
+        if st.session_state.get("authed"):
+            name = st.session_state.get("user", {}).get("name", "User")
+            st.caption(f"Signed in as: **{name}**")
+            st.button("Logout", on_click=logout)
+
     with st.sidebar:
         # Logo
         try:
