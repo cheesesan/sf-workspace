@@ -237,6 +237,28 @@ def detect_date_col(columns: list[str]) -> str | None:
         if "date" in lc or "time" in lc:
             return c
     return None
+def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    把类似 'P5-82', 'P5-82 (2)', 'P5-82 (3)' 合并成一个 'P5-82'
+    合并规则：每行从左到右取第一个非空值
+    """
+    base_to_cols = {}
+    for c in df.columns:
+        base = re.sub(r"\s\(\d+\)$", "", str(c))
+        base_to_cols.setdefault(base, []).append(c)
+
+    out = df.copy()
+    for base, cols in base_to_cols.items():
+        if len(cols) <= 1:
+            continue
+        # row-wise first non-null
+        merged = out[cols].bfill(axis=1).iloc[:, 0]
+        out[base] = merged
+        # drop the extra duplicates but keep the base
+        drop_cols = [c for c in cols if c != base]
+        out = out.drop(columns=drop_cols)
+
+    return out
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -296,7 +318,7 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
             s = s.replace({"": np.nan, "—": np.nan, "-": np.nan})
 
         df[c] = pd.to_numeric(s, errors="coerce")
-
+    df = coalesce_duplicate_columns(df)
 
     return df, raw_preview
 
@@ -587,6 +609,7 @@ def _fmt_num(x):
         return str(x)
 
 def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_labels: dict):
+
     """
     在 Home 页面展示类似 Breamar 的 Markets Snapshot:
     - 每个船型一列
@@ -677,6 +700,47 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
                 height=min(36 * (len(routes) + 1), 420),
             )
 
+def build_markets_snapshot(latest: pd.Series, prev: pd.Series | None,
+                           vessel_groups: dict, vessel_labels: dict) -> dict:
+    """
+    返回一个适合喂给 LLM 的 markets snapshot：
+    {
+      "Capesize": {"C2": {"value": 13.36, "chg": -0.18}, ...},
+      "Kamsarmax (82)": {...},
+      ...
+    }
+    """
+    out = {}
+    keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
+
+    for gkey in keys_in_order:
+        label = vessel_labels.get(gkey, gkey)
+        routes = vessel_groups.get(gkey, [])
+        route_map = {}
+
+        for r in routes:
+            v = latest.get(r, None)
+            if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+                continue
+
+            dv = None
+            if prev is not None:
+                pv = prev.get(r, None)
+                if pd.notna(pv) and pd.notna(v):
+                    try:
+                        dv = float(v) - float(pv)
+                    except Exception:
+                        dv = None
+
+            # 保留 2 位小数（routes 有 $/ton 或 index）
+            route_map[r] = {
+                "value": round(float(v), 2),
+                "chg": None if dv is None else round(float(dv), 2),
+            }
+
+        out[label] = route_map
+
+    return out
 
 # -------------------------
 # Pages
@@ -721,15 +785,30 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
             st.warning("No data in current range.")
         else:
             latest = dff.iloc[-1]
+            prev = dff.iloc[-2] if len(dff) >= 2 else None
             asof = str(pd.to_datetime(latest["DATE"]).date())
 
-        # 你先喂最小事实：KPI + latest date
-            snapshot = {
+        # 1) KPI snapshot
+            kpi_snapshot = {
                 "As of": asof,
                 "BDI": latest.get("BDI"),
                 "BPI": latest.get("BPI"),
                 "BCI": latest.get("BCI"),
                 "BSI": latest.get("BSI"),
+            }
+
+        # 2) Markets snapshot (routes)
+            markets_snapshot = build_markets_snapshot(
+                latest=latest,
+                prev=prev,
+                vessel_groups=VESSEL_GROUPS,
+                vessel_labels=VESSEL_LABELS,
+            )
+
+        # 3) 合并为一个 snapshot（喂给 Gemini）
+            snapshot = {
+                "kpi": kpi_snapshot,
+                "markets": markets_snapshot,
             }
 
             prompt = f"""
@@ -743,15 +822,18 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     {q if q.strip() else "Give a concise market summary in 3 bullet points."}
 
     Rules:
-    - Be concise
+    - Be concise (3-6 bullet points)
     - No fake numbers (only interpret what is given)
-    - Mention market tone + risk (volatility) if relevant
+    - Describe: overall tone + which segment is stronger/weaker (Capesize/Kamsarmax/Panamax/Supramax/Handy)
+    - If changes (chg) are present, mention notable movers (largest rises/falls)
+    - Add 1 risk note (volatility / event risk) but do not invent events
     """
 
-        with st.spinner("Gemini is thinking..."):
-            ans = ask_gemini(prompt)
+            with st.spinner("Gemini is thinking..."):
+                ans = ask_gemini(prompt)
 
-        st.markdown(ans)
+            st.markdown(ans)
+
 
     kpi_candidates = [c for c in ["BDI", "BPI", "BCI", "BSI", "BHSI"] if c in dff.columns]
     if not kpi_candidates and all_metrics:
