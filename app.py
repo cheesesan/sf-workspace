@@ -271,9 +271,26 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
             df = df.rename(columns={date_col: "DATE"})
 
     # numeric
+    # numeric (robust): remove commas/spaces in strings then to_numeric
     for c in df.columns:
-        if c != "DATE":
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+        if c == "DATE":
+            continue
+
+        s = df[c]
+
+    # 只有 object/string 才需要清洗
+        if s.dtype == "object":
+            s = (
+                s.astype(str)
+                .str.replace(",", "", regex=False)     # 去掉千分位逗号
+                .str.replace("\u00A0", " ", regex=False)  # NBSP
+                .str.strip()
+            )
+        # 空字符串转成 NaN（否则 to_numeric 会变成 NaN 也行，但这里更干净）
+            s = s.replace({"": np.nan, "—": np.nan, "-": np.nan})
+
+        df[c] = pd.to_numeric(s, errors="coerce")
+
 
     return df, raw_preview
 
