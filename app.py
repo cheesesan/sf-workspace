@@ -207,7 +207,13 @@ VESSEL_LABELS = {
 # Helpers: cleaning & load
 # -------------------------
 def _clean_col_name(name: str) -> str:
-    s = str(name).replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
+    s = str(name)
+
+    # normalize various dashes to normal hyphen "-"
+    s = s.replace("–", "-").replace("—", "-").replace("-", "-").replace("−", "-")
+
+    # normalize whitespace
+    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
     s = re.sub(r"\s+", " ", s)
     return s
 
@@ -590,6 +596,7 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
         return
 
     latest = dff.iloc[-1]
+    col_map = { _clean_col_name(c): c for c in dff.columns }
     asof = pd.to_datetime(latest["DATE"]).date() if "DATE" in dff.columns else None
     prev = dff.iloc[-2] if len(dff) >= 2 else None
 
@@ -625,11 +632,13 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
 
             rows = []
             for r in routes:
-                v = latest.get(r, None)
+                real_col = col_map.get(_clean_col_name(r), None)
+                v = latest.get(real_col, None) if real_col else None
+
 
                 dv = None
                 if prev is not None:
-                    pv = prev.get(r, None)
+                    pv = prev.get(real_col, None) if (prev is not None and real_col) else None
                     if pd.notna(v) and pd.notna(pv):
                         try:
                             dv = float(v) - float(pv)
