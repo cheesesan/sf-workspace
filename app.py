@@ -587,7 +587,6 @@ def bins_and_intervals_for_year(df: pd.DataFrame, col: str, year: int, n_bins: i
     intervals = pd.concat(all_intervals, ignore_index=True) if all_intervals else pd.DataFrame(columns=["range", "start_time", "end_time", "days"])
     intervals = intervals.sort_values(["start_time"]).reset_index(drop=True)
     return hist, intervals
-
 def format_interval_table(df_int: pd.DataFrame) -> pd.DataFrame:
     if df_int.empty:
         return df_int
