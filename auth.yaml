@@ -5,3 +5,7 @@ users:
   boss:
     name: "Others"
     password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
+  bowen:
+    name: "Bowen"
+    password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
+
