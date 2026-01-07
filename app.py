@@ -357,6 +357,12 @@ def add_returns_and_changes(df: pd.DataFrame, col: str) -> pd.DataFrame:
     out[f"{col}_ypct"] = s / s.shift(252) - 1
     return out
 
+def moving_average(df: pd.DataFrame, col: str, window: int = 20) -> pd.Series:
+    """
+    Simple moving average (SMA)
+    """
+    return df[col].rolling(window).mean()
+
 
 def rolling_volatility(df: pd.DataFrame, col: str, window: int = 20) -> pd.Series:
     ret = df[col].pct_change(1)
@@ -891,16 +897,18 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
         key="idx_base",
     )
 
-    show_vol = st.checkbox("Show rolling volatility", value=True, key="idx_vol_on")
-    vol_window = st.number_input(
-        "Vol window (days)",
+    show_ma = st.checkbox("Show moving average", value=True, key="idx_ma_on")
+
+    ma_window = st.number_input(
+        "Moving average window (days)",
         min_value=5,
         max_value=120,
         value=20,
         step=1,
-        disabled=not show_vol,
-        key="idx_vol_win",
+        disabled=not show_ma,
+        key="idx_ma_win",
     )
+
     show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="idx_yoymom_on")
 
     analytics_df = dff[["DATE", base_series]].dropna()
@@ -908,15 +916,16 @@ def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
 
     c1, c2 = st.columns(2)
     with c1:
-        if show_vol:
-            analytics_df["ROLL_VOL"] = rolling_volatility(analytics_df, base_series, window=int(vol_window))
-            plot_single(analytics_df, "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
+        if show_ma:
+            analytics_df["MA"] = moving_average(analytics_df, base_series, window=int(ma_window))
+            plot_single(analytics_df, "MA", f"Moving Average ({ma_window} days)")
     with c2:
         if show_yoy_mom:
             mom = f"{base_series}_mchg"
             yoy = f"{base_series}_ychg"
             tmp = analytics_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
             plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change")
+
 
     st.subheader("BDI DATA (table)")
     table_cols = st.multiselect(
@@ -959,7 +968,7 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
         key_prefix="tc_season",
     )
 
-    # ---- Analytics controls (moved INSIDE the page) ----
+    # ---- Analytics controls ----
     st.subheader("Analytics (choose a base series)")
 
     base_tc = st.selectbox(
@@ -969,16 +978,17 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
         key="tc_base",
     )
 
-    show_vol = st.checkbox("Show rolling volatility", value=True, key="tc_vol_on")
-    vol_window = st.number_input(
-        "Vol window (days)",
+    show_ma = st.checkbox("Show moving average", value=True, key="tc_ma_on")
+    ma_window = st.number_input(
+        "Moving average window (days)",
         min_value=5,
         max_value=120,
         value=20,
         step=1,
-        disabled=not show_vol,
-        key="tc_vol_win",
+        disabled=not show_ma,
+        key="tc_ma_win",
     )
+
     show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="tc_yoymom_on")
 
     tc_df = dff[["DATE", base_tc]].dropna()
@@ -986,15 +996,16 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
 
     c1, c2 = st.columns(2)
     with c1:
-        if show_vol:
-            tc_df["ROLL_VOL"] = rolling_volatility(tc_df, base_tc, window=int(vol_window))
-            plot_single(tc_df, "ROLL_VOL", f"Rolling volatility ({vol_window}d, annualized)")
+        if show_ma:
+            tc_df["MA"] = moving_average(tc_df, base_tc, window=int(ma_window))
+            plot_single(tc_df, "MA", f"Moving Average ({ma_window} days)")
     with c2:
         if show_yoy_mom:
             mom = f"{base_tc}_mchg"
             yoy = f"{base_tc}_ychg"
             tmp = tc_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
             plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change")
+
 
     st.subheader("TC DATA (table)")
     table_cols = st.multiselect(
