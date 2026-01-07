@@ -11,3 +11,5 @@ pyyaml
 bcrypt
 google-genai
 openpyxl
+google-generativeai
+python-doten

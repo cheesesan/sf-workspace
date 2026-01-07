@@ -1,24 +1,21 @@
-from google import genai
+# ai/gemini.py
 import os
-from google.genai import errors
 
-_client = None
+def ask_gemini(prompt: str) -> str:
+    """
+    Simple Gemini wrapper.
+    Requires env: GEMINI_API_KEY
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing GEMINI_API_KEY. Please set it in .env or Streamlit Secrets.")
 
-def get_client():
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    return _client
+    # --- Option A: Google Generative AI (API Key mode) ---
+    import google.generativeai as genai
 
-def ask_gemini(prompt: str, model: str = "models/gemini-flash-lite-latest") -> str:
-    try:
-        client = get_client()
-        resp = client.models.generate_content(model=model, contents=prompt)
-        return (resp.text or "").strip()
-    except errors.ClientError as e:
-        msg = str(e)
-        if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-            return "⚠️ Gemini API quota/billing issue. Please check plan & billing."
-        return f"⚠️ Gemini API error: {msg}"
-    except Exception as e:
-        return f"⚠️ Unexpected error: {e}"
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")  # 或 gemini-1.5-pro
+    resp = model.generate_content(prompt)
+
+    # 兼容性：有时 resp.text 为空，保险写法
+    return getattr(resp, "text", "") or str(resp)
