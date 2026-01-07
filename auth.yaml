@@ -8,4 +8,7 @@ users:
   bowen:
     name: "Bowen"
     password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
+  melanie:
+    name: "Melanie"
+    password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
 
