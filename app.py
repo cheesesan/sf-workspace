@@ -19,6 +19,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 load_dotenv() 
+import json
+import requests
 
 
 APP_TITLE = "BDI Dashboard"
@@ -89,6 +91,29 @@ FEEDBACK_DIR = Path("feedback")
 FEEDBACK_DIR.mkdir(exist_ok=True)
 FEEDBACK_CSV = FEEDBACK_DIR / "feedback.csv"
 
+def post_feedback_to_google(row: dict) -> None:
+    url = os.getenv("FEEDBACK_WEBHOOK_URL", "").strip()
+    token = os.getenv("FEEDBACK_WEBHOOK_TOKEN", "").strip()
+
+    if not url:
+        raise RuntimeError("Missing FEEDBACK_WEBHOOK_URL in env/.env")
+    if not token:
+        raise RuntimeError("Missing FEEDBACK_WEBHOOK_TOKEN in env/.env")
+
+    payload = dict(row)
+    payload["token"] = token
+
+    r = requests.post(url, data=json.dumps(payload), timeout=20)
+    r.raise_for_status()
+
+    try:
+        out = r.json()
+    except Exception:
+        raise RuntimeError(f"Webhook response not JSON: {r.text[:200]}")
+
+    if not out.get("ok"):
+        raise RuntimeError(out.get("error", "Unknown webhook error"))
+
 def save_feedback(
     user: dict | None,
     page: str,
@@ -97,21 +122,11 @@ def save_feedback(
     uploaded_files: list,
 ) -> str:
     """
-    Save feedback to feedback/feedback.csv and store attachments under feedback/uploads/<id>/
+    Save feedback to Google Sheet via webhook.
+    Attachments are ignored (per your requirement).
     Return feedback_id.
     """
     feedback_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
-    upload_dir = FEEDBACK_DIR / "uploads" / feedback_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    attachments = []
-    for f in uploaded_files or []:
-        # Streamlit UploadedFile: has .name and .getbuffer()
-        safe_name = f.name.replace("/", "_").replace("\\", "_")
-        out_path = upload_dir / safe_name
-        with open(out_path, "wb") as w:
-            w.write(f.getbuffer())
-        attachments.append(str(out_path))
 
     row = {
         "feedback_id": feedback_id,
@@ -119,20 +134,20 @@ def save_feedback(
         "username": (user or {}).get("username", ""),
         "display_name": (user or {}).get("name", ""),
         "page": page,
-        "subject": subject.strip(),
-        "message": message.strip(),
-        "attachments": ";".join(attachments),
+        "subject": (subject or "").strip(),
+        "message": (message or "").strip(),
+        "attachments": "",  # ✅ 保留字段但不存附件
     }
 
-    # write header if new
-    file_exists = FEEDBACK_CSV.exists()
-    with open(FEEDBACK_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(row)
+    # ✅ 写入 Google Sheet
+    post_feedback_to_google(row)
+    st.success(f"Thanks! Feedback received and logged to Google Sheet. (ID: {fid})")
+
 
     return feedback_id
+
+
+
 
 def render_contact_button(current_page: str):
     """
@@ -305,7 +320,7 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
             continue
 
         s = df[c]
-
+    
     # 只有 object/string 才需要清洗
         if s.dtype == "object":
             s = (
