@@ -87,32 +87,30 @@ def require_login() -> None:
 # =========================
 # Contact / Feedback
 # =========================
-FEEDBACK_DIR = Path("feedback")
-FEEDBACK_DIR.mkdir(exist_ok=True)
-FEEDBACK_CSV = FEEDBACK_DIR / "feedback.csv"
+import os, requests
+
+FEEDBACK_WEBHOOK_URL = os.getenv("FEEDBACK_WEBHOOK_URL", "")
+FEEDBACK_SECRET = os.getenv("FEEDBACK_SECRET", "")
 
 def post_feedback_to_google(row: dict) -> None:
-    url = os.getenv("FEEDBACK_WEBHOOK_URL", "").strip()
-    token = os.getenv("FEEDBACK_WEBHOOK_TOKEN", "").strip()
+    if not FEEDBACK_WEBHOOK_URL:
+        raise RuntimeError("Missing FEEDBACK_WEBHOOK_URL")
 
-    if not url:
-        raise RuntimeError("Missing FEEDBACK_WEBHOOK_URL in env/.env")
-    if not token:
-        raise RuntimeError("Missing FEEDBACK_WEBHOOK_TOKEN in env/.env")
-
-    payload = dict(row)
-    payload["token"] = token
-
-    r = requests.post(url, data=json.dumps(payload), timeout=20)
-    r.raise_for_status()
+    r = requests.post(
+        FEEDBACK_WEBHOOK_URL,
+        params={"key": FEEDBACK_SECRET},   # ✅ 带鉴权
+        json=row,
+        timeout=15,
+    )
 
     try:
         out = r.json()
     except Exception:
-        raise RuntimeError(f"Webhook response not JSON: {r.text[:200]}")
+        raise RuntimeError(f"Webhook non-JSON response: {r.status_code} {r.text[:200]}")
 
-    if not out.get("ok"):
+    if not out.get("ok", False):
         raise RuntimeError(out.get("error", "Unknown webhook error"))
+
 
 def save_feedback(
     user: dict | None,
