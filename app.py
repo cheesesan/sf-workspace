@@ -267,6 +267,47 @@ def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+import io
+import requests
+
+@st.cache_data(ttl=300)  # 5分钟缓存，避免每次刷新都打Google
+def load_google_sheet_as_df(sheet_id: str, tab_name: str) -> pd.DataFrame:
+    # Public Google Sheet -> CSV export
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={tab_name}"
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+
+    df = pd.read_csv(io.StringIO(r.text))
+    df.columns = [_clean_col_name(c) for c in df.columns]
+
+    # detect + parse DATE
+    date_col = detect_date_col(df.columns.tolist())
+    if date_col is None:
+        raise ValueError("No DATE column found in Google Sheet.")
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.dropna(subset=[date_col]).sort_values(date_col)
+    if date_col != "DATE":
+        df = df.rename(columns={date_col: "DATE"})
+
+    # numeric conversion
+    for c in df.columns:
+        if c == "DATE":
+            continue
+        s = df[c]
+        if s.dtype == "object":
+            s = (
+                s.astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace("\u00A0", " ", regex=False)
+                .str.strip()
+                .replace({"": np.nan, "—": np.nan, "-": np.nan})
+            )
+        df[c] = pd.to_numeric(s, errors="coerce")
+
+    df = coalesce_duplicate_columns(df)
+    return df.reset_index(drop=True)
+
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     # NOTE: engine="openpyxl" avoids "Excel file format cannot be determined"
@@ -1278,6 +1319,27 @@ def main():
         st.session_state.all_metrics = None
     if "vessel_group_key" not in st.session_state:
         st.session_state.vessel_group_key = "CAPE"
+# -------------------------
+# Auto-load from Google Sheet on first visit
+# -------------------------
+    if not st.session_state.get("data_loaded"):
+        sheet_id = os.getenv("GOOGLE_SHEET_ID", "")
+        tab_name = os.getenv("GOOGLE_SHEET_TAB", "bdi index")
+
+        if sheet_id:
+            try:
+                df0 = load_google_sheet_as_df(sheet_id, tab_name)
+                if not df0.empty:
+                    st.session_state.df = df0
+                    st.session_state.all_metrics = [c for c in df0.columns if c != "DATE"]
+                    st.session_state.data_loaded = True
+            except Exception as e:
+            # 不要让首页崩掉；只是提示
+                st.session_state.data_loaded = False
+                st.session_state.df = None
+                st.session_state.all_metrics = None
+                st.sidebar.warning("⚠️ Auto-load Google Sheet failed.")
+                st.sidebar.caption(f"{type(e).__name__}: {e}")
 
     # -------------------------
     # Sidebar: ONLY Logo / Data / Filters / Default page + Open page
@@ -1370,14 +1432,10 @@ def main():
     if go:
         st.session_state.active_page = page
 
-        # Only load data if uploaded exists
-        if uploaded is None:
-            st.session_state.data_loaded = False
-            st.session_state.df = None
-            st.session_state.all_metrics = None
-        else:
-            hdr = None if st.session_state.auto_header else int(st.session_state.header_row_input)
+    # 如果用户上传了文件，就用上传文件覆盖
+        if uploaded is not None:
             try:
+                hdr = None if st.session_state.auto_header else int(st.session_state.header_row_input)
                 df, raw_preview = load_excel(uploaded, sheet_name=st.session_state.sheet_name, header_row=hdr)
                 df = ensure_date(df, raw_preview).sort_values("DATE").reset_index(drop=True)
 
@@ -1392,8 +1450,11 @@ def main():
                 st.session_state.data_loaded = False
                 st.session_state.df = None
                 st.session_state.all_metrics = None
-                st.warning("⚠️ Failed to load data. Please upload a valid .xlsx and check sheet/header settings.")
+                st.warning("⚠️ Failed to load uploaded Excel.")
                 st.caption(f"Debug: {type(e).__name__}: {e}")
+
+    # 如果没上传，就不动当前数据（继续用 Google Sheet auto-load 的）
+
 
     # -------------------------
     # Always render HOME shell (only Title + Quick View)
