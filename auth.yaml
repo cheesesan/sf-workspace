@@ -3,7 +3,7 @@ users:
     name: "Rachel"
     password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
   boss:
-    name: "Others"
+    name: "Mr. Jiang"
     password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
   bowen:
     name: "Bowen"
@@ -11,4 +11,5 @@ users:
   melanie:
     name: "Melanie"
     password_hash: "$2b$12$DCbmLppigtwzu5j2EnrHnOxnh.tyd0qXldWBF1NSGmTtK.kTNtGwW"
+  
 
