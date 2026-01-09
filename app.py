@@ -133,7 +133,7 @@ def save_feedback(
 
     # ✅ 写入 Google Sheet
     post_feedback_to_google(row)
-    st.success(f"Thanks! Feedback received and logged to Google Sheet. (ID: {fid})")
+    st.success(f"Thanks! Feedback received and logged to Google Sheet.")
 
 
     return feedback_id
