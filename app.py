@@ -816,11 +816,31 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
                 vessel_groups=VESSEL_GROUPS,
                 vessel_labels=VESSEL_LABELS,
             )
+            # 1.5) TC Average snapshot
+            tc_cols = [
+                "BCI 5TC AV",
+                "BPI 82 TC AV",
+                "BPI 74 TC AV",
+                "BSI 63 TC AV",  
+                "BHSI 38 TC AV",
+                "BHSI 28 TC AV",
+                ]
+            tc_snapshot = {}
+            for c in tc_cols:
+                if c in dff.columns:
+                    v = latest.get(c)
+                    pv = prev.get(c) if prev is not None else None
+                    tc_snapshot[c] = {
+                        "value": None if pd.isna(v) else round(float(v), 2),
+                        "chg": None if (prev is None or pd.isna(v) or pd.isna(pv)) else round(float(v - pv), 2),
+                    }
+
 
         # 3) 合并为一个 snapshot（喂给 Gemini）
             snapshot = {
                 "kpi": kpi_snapshot,
                 "markets": markets_snapshot,
+                "tc_avg": tc_snapshot
             }
 
             prompt = f"""
@@ -837,6 +857,8 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
     - Be concise (3-6 bullet points)
     - No fake numbers (only interpret what is given)
     - Describe: overall tone + which segment is stronger/weaker (Capesize/Kamsarmax/Panamax/Supramax/Handy)
+    - Also interpret TC Average (tc_avg): mention which TC segment is rising/failing and notable movers
+    - Use 'value' and 'chg' fields only; do not invent numbers
     - If changes (chg) are present, mention notable movers (largest rises/falls)
     - Add 1 risk note (volatility / event risk) but do not invent events
     """
