@@ -861,7 +861,43 @@ def render_home(dff: pd.DataFrame | None, all_metrics: list[str] | None):
                 cols[i].metric(name, f"{val:,.0f}")
             else:
                 cols[i].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
-    render_markets_snapshot(dff, VESSEL_GROUPS, VESSEL_LABELS)            
+    render_markets_snapshot(dff, VESSEL_GROUPS, VESSEL_LABELS)
+    # -------------------------
+    # TC Average (latest) metrics row(s)
+    # -------------------------
+    st.markdown("##### TC Average (latest)")
+
+    tc_metric_cols = [
+        "BCI 5TC AV",
+        "BPI 82 TC AV",
+        "BPI 74 TC AV",
+        "BSI 63 TC AV",
+        "BHSI 38 TC AV",
+        "BHSI 28 TC AV",
+    ]
+    tc_metric_cols = [c for c in tc_metric_cols if c in dff.columns]
+
+    if tc_metric_cols:
+        # 每行最多放 4 个，和上面 KPI 的视觉一致
+        per_row = 4
+        for r in range(0, len(tc_metric_cols), per_row):
+            row_cols = tc_metric_cols[r : r + per_row]
+            ui_cols = st.columns(len(row_cols))
+
+            for j, name in enumerate(row_cols):
+                val = latest.get(name, np.nan)
+
+                if pd.isna(val):
+                    ui_cols[j].metric(name, "—")
+                else:
+                    # delta vs previous day (same logic as KPI)
+                    if prev is None or pd.isna(prev.get(name, np.nan)):
+                        ui_cols[j].metric(name, f"{val:,.0f}")
+                    else:
+                        ui_cols[j].metric(name, f"{val:,.0f}", f"{(val - prev[name]):,.0f}")
+    else:
+        st.caption("No TC Average columns found in the uploaded data.")
+            
 
 def render_index_page(dff: pd.DataFrame, all_metrics: list[str]):
     st.header("Index")
