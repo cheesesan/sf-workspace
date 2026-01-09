@@ -87,28 +87,22 @@ def require_login() -> None:
 # =========================
 # Contact / Feedback
 # =========================
+
+
 import os, requests
 
 FEEDBACK_WEBHOOK_URL = os.getenv("FEEDBACK_WEBHOOK_URL", "")
 FEEDBACK_SECRET = os.getenv("FEEDBACK_SECRET", "")
 
 def post_feedback_to_google(row: dict) -> None:
-    if not FEEDBACK_WEBHOOK_URL:
-        raise RuntimeError("Missing FEEDBACK_WEBHOOK_URL")
-
     r = requests.post(
         FEEDBACK_WEBHOOK_URL,
-        params={"key": FEEDBACK_SECRET},   # ✅ 带鉴权
+        params={"key": FEEDBACK_SECRET},
         json=row,
         timeout=15,
     )
-
-    try:
-        out = r.json()
-    except Exception:
-        raise RuntimeError(f"Webhook non-JSON response: {r.status_code} {r.text[:200]}")
-
-    if not out.get("ok", False):
+    out = r.json()
+    if not out.get("ok"):
         raise RuntimeError(out.get("error", "Unknown webhook error"))
 
 
