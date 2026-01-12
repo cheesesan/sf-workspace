@@ -252,7 +252,7 @@ def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     base_to_cols = {}
     for c in df.columns:
-        base = re.sub(r"\s\(\d+\)$", "", str(c))
+        base = re.sub(r"(\s\(\d+\)|\.\d+)$", "", str(c))
         base_to_cols.setdefault(base, []).append(c)
 
     out = df.copy()
@@ -295,18 +295,30 @@ def load_google_sheet_as_df(sheet_id: str, tab_name: str) -> pd.DataFrame:
     for c in df.columns:
         if c == "DATE":
             continue
+
         s = df[c]
+
         if s.dtype == "object":
-            s = (
-                s.astype(str)
-                .str.replace(",", "", regex=False)
-                .str.replace("\u00A0", " ", regex=False)
-                .str.strip()
-                .replace({"": np.nan, "—": np.nan, "-": np.nan})
-            )
+            s = s.astype(str)
+
+        # 常见空值符号
+            s = s.replace({"": np.nan, "—": np.nan, "–": np.nan, "N/A": np.nan, "na": np.nan})
+
+        # 去 NBSP & 空格
+            s = s.str.replace("\u00A0", " ", regex=False).str.strip()
+
+        # 去千分位逗号
+            s = s.str.replace(",", "", regex=False)
+
+        # ✅ 关键：去掉所有“非数字/非小数点/非负号”的字符（比如 $、USD、/day）
+            s = s.str.replace(r"[^0-9\.\-]", "", regex=True)
+
+        # 清理成空字符串的
+            s = s.replace({"": np.nan, "-": np.nan})
+
         df[c] = pd.to_numeric(s, errors="coerce")
 
-    df = coalesce_duplicate_columns(df)
+        df = coalesce_duplicate_columns(df)
     return df.reset_index(drop=True)
 
 
@@ -1427,7 +1439,6 @@ def main():
     
     df = st.session_state.df
     all_metrics = st.session_state.all_metrics
-    st.write([c for c in df.columns if "P5" in str(c)])
 
     # Apply quick range (end always = last data date)
     min_date = df["DATE"].min().date()
