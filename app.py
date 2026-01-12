@@ -222,6 +222,7 @@ def _clean_col_name(name: str) -> str:
     # normalize whitespace
     s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
     s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\s*-\s*", "-", s)
     return s
 
 
@@ -755,37 +756,34 @@ def render_markets_snapshot(dff: pd.DataFrame, vessel_groups: dict, vessel_label
 
 def build_markets_snapshot(latest: pd.Series, prev: pd.Series | None,
                            vessel_groups: dict, vessel_labels: dict) -> dict:
-    """
-    返回一个适合喂给 LLM 的 markets snapshot：
-    {
-      "Capesize": {"C2": {"value": 13.36, "chg": -0.18}, ...},
-      "Kamsarmax (82)": {...},
-      ...
-    }
-    """
     out = {}
-    keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
+    # ✅ map cleaned -> real column
+    col_map = { _clean_col_name(c): c for c in latest.index }
 
+    keys_in_order = ["CAPE", "KMX_82", "PMX_74", "SMX_TESS_63", "HANDY_38"]
     for gkey in keys_in_order:
         label = vessel_labels.get(gkey, gkey)
         routes = vessel_groups.get(gkey, [])
         route_map = {}
 
         for r in routes:
-            v = latest.get(r, None)
-            if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+            real_col = col_map.get(_clean_col_name(r))
+            if not real_col:
+                continue
+
+            v = latest.get(real_col)
+            if v is None or pd.isna(v):
                 continue
 
             dv = None
             if prev is not None:
-                pv = prev.get(r, None)
-                if pd.notna(pv) and pd.notna(v):
+                pv = prev.get(real_col)
+                if pv is not None and pd.notna(pv):
                     try:
                         dv = float(v) - float(pv)
                     except Exception:
                         dv = None
 
-            # 保留 2 位小数（routes 有 $/ton 或 index）
             route_map[r] = {
                 "value": round(float(v), 2),
                 "chg": None if dv is None else round(float(dv), 2),
@@ -794,6 +792,8 @@ def build_markets_snapshot(latest: pd.Series, prev: pd.Series | None,
         out[label] = route_map
 
     return out
+
+st.write([c for c in df.columns if "P5" in str(c)])
 
 # -------------------------
 # Pages
@@ -1359,24 +1359,6 @@ def main():
             pass
         st.markdown("---")
 
-        # Data (Upload)
-        st.header("Data")
-        uploaded = st.file_uploader("Upload your BDI DATA.xlsx", type=["xlsx"], key="uploader")
-
-        # Optional advanced parsing controls INSIDE Data (collapsed)
-        with st.expander("Advanced (Excel parsing)", expanded=False):
-            sheet_name = st.text_input("Sheet name", value=DEFAULT_SHEET, key="sheet_name")
-            auto_header = st.checkbox("Auto-detect header row", value=True, key="auto_header")
-            header_row_input = st.number_input(
-                "Header row (0-based, if not auto)",
-                min_value=0,
-                max_value=80,
-                value=1,
-                step=1,
-                disabled=auto_header,
-                key="header_row_input",
-            )
-
         # Filters (Quick range) - enabled only AFTER data loaded
         st.header("Filters (Quick range)")
         quick = st.selectbox(
@@ -1431,27 +1413,6 @@ def main():
     # -------------------------
     if go:
         st.session_state.active_page = page
-
-    # 如果用户上传了文件，就用上传文件覆盖
-        if uploaded is not None:
-            try:
-                hdr = None if st.session_state.auto_header else int(st.session_state.header_row_input)
-                df, raw_preview = load_excel(uploaded, sheet_name=st.session_state.sheet_name, header_row=hdr)
-                df = ensure_date(df, raw_preview).sort_values("DATE").reset_index(drop=True)
-
-                if df.empty:
-                    raise ValueError("No data rows after parsing.")
-
-                st.session_state.df = df
-                st.session_state.all_metrics = [c for c in df.columns if c != "DATE"]
-                st.session_state.data_loaded = True
-
-            except Exception as e:
-                st.session_state.data_loaded = False
-                st.session_state.df = None
-                st.session_state.all_metrics = None
-                st.warning("⚠️ Failed to load uploaded Excel.")
-                st.caption(f"Debug: {type(e).__name__}: {e}")
 
     # 如果没上传，就不动当前数据（继续用 Google Sheet auto-load 的）
 
