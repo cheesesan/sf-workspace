@@ -320,7 +320,7 @@ def load_google_sheet_as_df(sheet_id: str, tab_name: str) -> pd.DataFrame:
 
         df[c] = pd.to_numeric(s, errors="coerce")
 
-        df = coalesce_duplicate_columns(df)
+    df = coalesce_duplicate_columns(df)
     return df.reset_index(drop=True)
 
 
