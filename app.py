@@ -793,8 +793,6 @@ def build_markets_snapshot(latest: pd.Series, prev: pd.Series | None,
 
     return out
 
-st.write([c for c in df.columns if "P5" in str(c)])
-
 # -------------------------
 # Pages
 # -------------------------
