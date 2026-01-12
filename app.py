@@ -791,6 +791,8 @@ def build_markets_snapshot(latest: pd.Series, prev: pd.Series | None,
 
         out[label] = route_map
 
+
+
     return out
 
 # -------------------------
@@ -1425,6 +1427,7 @@ def main():
     
     df = st.session_state.df
     all_metrics = st.session_state.all_metrics
+    st.write([c for c in df.columns if "P5" in str(c)])
 
     # Apply quick range (end always = last data date)
     min_date = df["DATE"].min().date()
