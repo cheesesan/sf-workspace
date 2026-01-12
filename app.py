@@ -247,28 +247,28 @@ def detect_date_col(columns: list[str]) -> str | None:
     return None
 def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    把类似 'P5-82', 'P5-82 (2)', 'P5-82 (3)' 合并成一个 'P5-82'
+    合并重复列名：
+    - 支持 'P5-82', 'P5-82 (2)', 'P5-82.1' 等
     合并规则：每行从左到右取第一个非空值
     """
     base_to_cols = {}
     for c in df.columns:
-        base = re.sub(r"(\s\(\d+\)|\.\d+)$", "", str(c))
+        sc = str(c)
+        # 去掉 pandas 的 .1/.2 后缀；也去掉 ' (2)' 这种后缀
+        base = re.sub(r"(\s\(\d+\)|\.\d+)$", "", sc).strip()
         base_to_cols.setdefault(base, []).append(c)
 
     out = df.copy()
     for base, cols in base_to_cols.items():
         if len(cols) <= 1:
             continue
-        # row-wise first non-null
         merged = out[cols].bfill(axis=1).iloc[:, 0]
         out[base] = merged
-        # drop the extra duplicates but keep the base
         drop_cols = [c for c in cols if c != base]
         out = out.drop(columns=drop_cols)
-    st.write("P5-82 raw tail:", df["P5-82"].tail(5))
-    st.write("P5-82 non-null count:", df["P5-82"].notna().sum())
 
     return out
+
 
 import io
 import requests
