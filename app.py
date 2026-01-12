@@ -265,6 +265,8 @@ def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
         # drop the extra duplicates but keep the base
         drop_cols = [c for c in cols if c != base]
         out = out.drop(columns=drop_cols)
+    st.write("P5-82 raw tail:", df["P5-82"].tail(5))
+    st.write("P5-82 non-null count:", df["P5-82"].notna().sum())
 
     return out
 
@@ -358,8 +360,6 @@ def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> 
         df = df.dropna(subset=[date_col]).sort_values(date_col)
         if date_col != "DATE":
             df = df.rename(columns={date_col: "DATE"})
-    st.write("P5-82 raw tail:", df["P5-82"].tail(5))
-    st.write("P5-82 non-null count:", df["P5-82"].notna().sum())
 
     # numeric
     # numeric (robust): remove commas/spaces in strings then to_numeric
