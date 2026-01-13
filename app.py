@@ -425,6 +425,7 @@ def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
     df = coalesce_duplicate_columns(df)
     return df.reset_index(drop=True)
 
+FFA_SHEET_ID = "1ma1-ZyBYVhzAUG51yUh0uSdwDl3AbhtxPyJeu8LdjvM"
 FFA_TABS = ["PMX 5TC", "PMX 4TC"]
 
 
