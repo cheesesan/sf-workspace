@@ -209,6 +209,39 @@ VESSEL_LABELS = {
 }
 
 
+# =========================
+# FFA Google Sheet (Forward Curve)
+# =========================
+# 放 secrets：st.secrets["FFA_SHEET_ID"]
+FFA_TABS = {
+    "P1A": "FFA - P1A",
+    "P2A": "FFA - P2A",
+    "P3A": "FFA - P3A",
+    "P4":  "FFA - P4",
+    "P6":  "FFA - P6",
+    # 可选：你如果也想展示 5TC tab，就加上
+    "5TC": "FFA - 5TC",
+}
+
+PMX5TC_WEIGHTS = {
+    "P1A": 0.25,
+    "P2A": 0.10,
+    "P3A": 0.25,
+    "P4":  0.10,
+    "P6":  0.30,
+}
+
+# 你的 index 数据里对应列名（按你数据里真实列名改）
+# 很多 BPI 数据会是 "P1A-82", "P2A-82"...
+PMX_ROUTE_COL_IN_INDEX = {
+    "P1A": "P1A-82",
+    "P2A": "P2A-82",
+    "P3A": "P3A-82",
+    "P4":  "P4-82",
+    "P6":  "P6-82",
+}
+
+
 # -------------------------
 # Helpers: cleaning & load
 # -------------------------
@@ -1193,6 +1226,8 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
         title_prefix="TC Avg Seasonality",
         key_prefix="tc_season",
     )
+
+
 def render_ffa_page(
     index_df_full: pd.DataFrame,   # 用全量历史拟合回归（不要用 dff 截断）
     dff_filtered: pd.DataFrame,    # 用筛选范围做 ratio daily 更直观
