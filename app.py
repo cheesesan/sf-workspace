@@ -428,15 +428,6 @@ def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
 FFA_SHEET_ID = "1ma1-ZyBYVhzAUG51yUh0uSdwDl3AbhtxPyJeu8LdjvM"
 FFA_TABS = ["PMX 5TC", "PMX 4TC"]
 
-st.header("FFA")
-
-ffa_tab = st.selectbox(
-    "Choose FFA curve",
-    options=FFA_TABS,   # ["PMX 5TC", "PMX 4TC"]
-    index=0,
-)
-
-ffa_df = load_google_sheet_raw(FFA_SHEET_ID, ffa_tab)
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
