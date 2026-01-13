@@ -1369,13 +1369,6 @@ def render_ffa_page(
 
     
 
-
-    o1, o2, o3, o4 = st.columns(4)
-    o1.metric("FFA input (x)", _fmt_2(x_val))
-    o2.metric("Linear forecast", _fmt_2(pred_linear))
-    o3.metric("Quadratic forecast", _fmt_2(pred_quad))
-    o4.metric("Cubic forecast", _fmt_2(pred_cubic))
-
     with st.expander("Show fitted coefficients (debug)"):
         st.write("Linear (deg=1):", coefs[1])
         st.write("Quadratic (deg=2):", coefs[2])
