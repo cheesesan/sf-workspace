@@ -372,39 +372,33 @@ def load_google_sheet_as_df(sheet_id: str, tab_name: str) -> pd.DataFrame:
 
     df = coalesce_duplicate_columns(df)
     return df.reset_index(drop=True)
-# =========================
-# FFA Google Sheet (Forward Curve)
-# =========================
-# 
-FFA_SHEET_ID = "1ma1-ZyBYVhzAUG51yUh0uSdwDl3AbhtxPyJeu8LdjvM"
-FFA_TABS = ["PMX 5TC", "PMX 4TC"]
 
-# =========================
-# Correlation / regression reference (optional, only for displaying / future extension)
-# (你说是 google sheet：1uljMVj7wvlta72rZVNLRLTp0QegpHlmGVCfxJEnfn3E
-# 这里先不强依赖它，因为我们用历史数据现场拟合就能复刻你Excel逻辑)
-# =========================
-CORR_SHEET_ID = "1uljMVj7wvlta72rZVNLRLTp0QegpHlmGVCfxJEnfn3E"
+import io
+import urllib.parse
+import requests
 
 
 @st.cache_data(ttl=300)
 def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
-    """
-    更通用的 Google Sheet loader：
-    - 保留所有列
-    - 自动识别 date 列并统一成 DATE
-    - 其余列尽量转 numeric（保留 NaN）
-    """
-    import io, requests
+    # URL encode sheet/tab name (handles spaces like "PMX 5TC")
+    tab_q = urllib.parse.quote(tab_name, safe="")
 
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={tab_name}"
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={tab_q}"
+
     r = requests.get(url, timeout=30)
-    r.raise_for_status()
+    # helpful debug if Google returns HTML error page
+    if r.status_code != 200:
+        raise RuntimeError(f"Google Sheet HTTP {r.status_code}: {r.text[:200]}")
+
+    # If not CSV, you'll see HTML here (permission/redirect)
+    ct = (r.headers.get("content-type") or "").lower()
+    if "text/csv" not in ct and "application/vnd.ms-excel" not in ct:
+        # still try parse, but show first chars for debugging
+        raise RuntimeError(f"Unexpected response type: {ct}. Body head: {r.text[:200]}")
 
     df = pd.read_csv(io.StringIO(r.text))
     df.columns = [_clean_col_name(c) for c in df.columns]
 
-    # detect + parse DATE
     date_col = detect_date_col(df.columns.tolist())
     if date_col is None:
         raise ValueError(f"No DATE column found in Google Sheet tab: {tab_name}")
@@ -415,7 +409,6 @@ def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
     if date_col != "DATE":
         df = df.rename(columns={date_col: "DATE"})
 
-    # numeric conversion for all non-date cols
     for c in df.columns:
         if c == "DATE":
             continue
@@ -431,6 +424,19 @@ def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
 
     df = coalesce_duplicate_columns(df)
     return df.reset_index(drop=True)
+
+FFA_SHEET_ID = "1ma1-ZyBYVhzAUG51yUh0uSdwDl3AbhtxPyJeu8LdjvM"
+FFA_TABS = ["PMX 5TC", "PMX 4TC"]
+
+st.header("FFA")
+
+ffa_tab = st.selectbox(
+    "Choose FFA curve",
+    options=FFA_TABS,   # ["PMX 5TC", "PMX 4TC"]
+    index=0,
+)
+
+ffa_df = load_google_sheet_raw(FFA_SHEET_ID, ffa_tab)
 
 
 def load_excel(file_or_path, sheet_name: str, header_row: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
