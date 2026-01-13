@@ -1261,68 +1261,114 @@ def render_ffa_page(
     ffa_dates = _nearest_date_options(ffa_df)
 
     st.markdown("---")
-
     # =========================================================
-    # 1) CALCULATION: 输入 FFA -> 预测未来 index value
+    # 1) CALCULATION: PMX 5TC / 4TC -> Forecast P1A/P2A/P3A/P4/P6
+    #    ✅ 用 correlation Google Sheet (Data tab) 做拟合
     # =========================================================
-    st.subheader("1) Calculation (FFA ➜ Index Forecast)")
+    st.subheader("1) Calculation (Panamax 5TC/4TC ➜ P1A/P2A/P3A/P4/P6)")
 
-    # 选择要预测的“航线/指标”（来自你 index 数据里现有列）
-    # 这里给你更灵活：可选任意 metric（含 routes / index / tc）
-    target_col = st.selectbox(
-        "Choose target index/route to forecast (y)",
-        options=all_metrics,
-        index=all_metrics.index("P5-82") if "P5-82" in all_metrics else 0,
-        key="ffa_calc_target",
-    )
+    # ---- correlation sheet settings ----
+    CORR_SHEET_ID = st.secrets.get("CORR_SHEET_ID", "1uljMVj7wvlta72rZVNLRLTp0QegpHlmGVCfxJEnfn3E")
+    CORR_TAB = st.secrets.get("CORR_TAB", "Data")
 
-    # x-series：按 PMX 5TC/4TC 给默认映射；如果不存在就让用户自己选
-    default_x = None
-    if "5TC" in ffa_tab:
-        default_x = "BPI 82 TC AV" if "BPI 82 TC AV" in index_df_full.columns else None
-    else:
-        default_x = "BPI 74 TC AV" if "BPI 74 TC AV" in index_df_full.columns else None
+    PANAMAX_ROUTES = ["P1A", "P2A", "P3A", "P4", "P6"]
+    PMX5TC_WEIGHTS = {"P1A": 0.25, "P2A": 0.10, "P3A": 0.25, "P4": 0.10, "P6": 0.30}
 
-    x_candidates = [c for c in all_metrics if "TC AV" in c.upper() or "5TC AV" in c.upper()] or all_metrics
+    # 1) 读 correlation 数据（用来拟合）
+    try:
+        corr_df = load_google_sheet_raw(CORR_SHEET_ID, CORR_TAB)
+    except Exception as e:
+        st.error("Failed to load correlation Google Sheet (Data tab).")
+        st.caption(f"{type(e).__name__}: {e}")
+        st.caption("Please ensure CORR sheet is shared (Anyone with link) or published.")
+        return
 
-    x_col = st.selectbox(
-        "Choose base TC series for regression (x)",
-        options=x_candidates,
-        index=(x_candidates.index(default_x) if (default_x in x_candidates) else 0),
-        key="ffa_calc_xcol",
-    )
+# 2) x 列：5TC / 4TC
+#   - 你的 excel 里对应列名是：'5TC Index' / '4TC FFA'
+    x_col = "5TC Index" if "5TC" in ffa_tab else "4TC FFA"
 
-    # 选择一个日期 + 合约，从 forward curve 直接取 x_val（也可手动覆盖）
+    need_cols = [x_col] + PANAMAX_ROUTES
+    missing = [c for c in need_cols if c not in corr_df.columns]
+    if missing:
+        st.error("Correlation sheet is missing required columns:")
+        st.write(missing)
+        st.caption(f"Expected at least: {need_cols}")
+        return
+
+# 3) 仍然用 forward curve sheet 选 Date + Contract 来取 x_val
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        pick_date = st.selectbox("Pick Date (from FFA sheet)", options=ffa_dates, index=len(ffa_dates)-1, key="ffa_calc_date")
+        pick_date = st.selectbox(
+            "Pick Date (from FFA sheet)",
+            options=ffa_dates,
+            index=len(ffa_dates) - 1,
+            key="ffa_calc_date",
+    )
     with c2:
-        pick_contract = st.selectbox("Pick Contract", options=contract_cols, index=0, key="ffa_calc_contract")
+        pick_contract = st.selectbox(
+            "Pick Contract",
+            options=contract_cols,
+            index=0,
+            key="ffa_calc_contract",
+        )
 
     auto_x = _get_value_by_date(ffa_df, pick_date, pick_contract)
 
     with c3:
         x_val = st.number_input(
-            "FFA input (x) — you can override",
+            f"FFA input (x) — {ffa_tab} (override if needed)",
             value=(float(auto_x) if pd.notna(auto_x) else 0.0),
             step=10.0,
             key="ffa_calc_xval",
         )
 
-    # 现场拟合回归（用全量 index_df_full）
-    if x_col not in index_df_full.columns or target_col not in index_df_full.columns:
-        st.warning("Selected x or y column not found in index dataset.")
-        return
+# 4) 选择模型（保留你原来的 1/2/3 次多项式）
+    deg = st.selectbox(
+        "Regression model",
+        options=[1, 2, 3],
+        index=0,
+        format_func=lambda d: {1: "Linear", 2: "Quadratic", 3: "Cubic"}[d],
+        key="ffa_calc_model_deg",
+)
 
-    coefs = fit_poly_models(index_df_full[x_col], index_df_full[target_col])
-    if coefs is None:
-        st.info("Not enough historical overlap data to fit regression.")
-        return
+# 5) 对五条航线分别拟合并预测
+    rows = []
+    for r in PANAMAX_ROUTES:
+        coefs = fit_poly_models(corr_df[x_col], corr_df[r])
+        if coefs is None or deg not in coefs:
+            pred = np.nan
+        else:
+            pred = predict_with_poly(coefs[deg], float(x_val))
+        rows.append({"Route": r, "Forecast": pred})
 
-    # 输出三种模型预测
-    pred_linear = predict_with_poly(coefs[1], x_val)
-    pred_quad   = predict_with_poly(coefs[2], x_val)
-    pred_cubic  = predict_with_poly(coefs[3], x_val)
+    pred_df = pd.DataFrame(rows)
+
+# 展示结果
+    st.markdown("**Forecast results (routes)**")
+    st.dataframe(pred_df, use_container_width=True, hide_index=True)
+
+# 6) 如果是 5TC：算 weighted average（你给的权重）
+    if "5TC" in ffa_tab:
+        ok = True
+        wavg = 0.0
+        for r, w in PMX5TC_WEIGHTS.items():
+            v = pred_df.loc[pred_df["Route"] == r, "Forecast"].iloc[0]
+            if pd.isna(v):
+                ok = False
+                break
+            wavg += float(v) * float(w)
+
+        st.markdown("**Predicted 5TC weighted average (from routes)**")
+        st.metric("5TC (Σ route × weight)", _fmt_2(wavg) if ok else "—")
+
+# 7) debug 展示：系数（可选）
+    with st.expander("Show fitted coefficients (debug)"):
+        for r in PANAMAX_ROUTES:
+            coefs = fit_poly_models(corr_df[x_col], corr_df[r])
+            st.write(f"{r} coef (deg={deg}):", None if coefs is None else coefs.get(deg))
+
+    
+
 
     o1, o2, o3, o4 = st.columns(4)
     o1.metric("FFA input (x)", _fmt_2(x_val))
