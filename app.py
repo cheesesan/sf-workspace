@@ -61,7 +61,6 @@ def require_login() -> None:
         return
 
     # login UI
-    st.set_page_config(page_title="BDI Dashboard", layout="wide")
     st.title("BDI Dashboard")
     st.caption("Please sign in to continue.")
 
@@ -268,6 +267,57 @@ def coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
         out = out.drop(columns=drop_cols)
 
     return out
+def _nearest_date_options(df: pd.DataFrame) -> list:
+    """给 selectbox 用：返回 df 中可选日期（date 类型）"""
+    if df is None or df.empty or "DATE" not in df.columns:
+        return []
+    return sorted(pd.to_datetime(df["DATE"]).dt.date.unique().tolist())
+
+def _get_value_by_date(df: pd.DataFrame, pick_date, col: str):
+    """严格按日期取值（同一天多行时取最后一行）"""
+    if df is None or df.empty:
+        return np.nan
+    if "DATE" not in df.columns or col not in df.columns:
+        return np.nan
+    tmp = df.copy()
+    tmp["D"] = pd.to_datetime(tmp["DATE"]).dt.date
+    sub = tmp[tmp["D"] == pick_date]
+    if sub.empty:
+        return np.nan
+    return sub.iloc[-1][col]
+
+def fit_poly_models(x: pd.Series, y: pd.Series):
+    """
+    复刻你Excel里的三种模型：
+    - Linear: y = a*x + b
+    - Quadratic: y = a*x^2 + b*x + c
+    - Cubic: y = a*x^3 + b*x^2 + c*x + d
+    返回：coeff dict + 便于显示的函数
+    """
+    df_xy = pd.DataFrame({"x": x, "y": y}).dropna()
+    if len(df_xy) < 10:
+        return None  # 数据太少就不拟合
+
+    xv = df_xy["x"].astype(float).to_numpy()
+    yv = df_xy["y"].astype(float).to_numpy()
+
+    out = {}
+    for deg in [1, 2, 3]:
+        coef = np.polyfit(xv, yv, deg)
+        out[deg] = coef  # numpy poly coef: highest power first
+    return out
+
+def predict_with_poly(coef: np.ndarray, x_val: float) -> float:
+    p = np.poly1d(coef)
+    return float(p(x_val))
+
+def _fmt_2(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)) or pd.isna(v):
+        return "—"
+    try:
+        return f"{float(v):,.2f}"
+    except Exception:
+        return "—"
 
 
 import io
@@ -318,6 +368,65 @@ def load_google_sheet_as_df(sheet_id: str, tab_name: str) -> pd.DataFrame:
         # 清理成空字符串的
             s = s.replace({"": np.nan, "-": np.nan})
 
+        df[c] = pd.to_numeric(s, errors="coerce")
+
+    df = coalesce_duplicate_columns(df)
+    return df.reset_index(drop=True)
+# =========================
+# FFA Google Sheet (Forward Curve)
+# =========================
+# 
+FFA_SHEET_ID = "1ma1-ZyBYVhzAUG51yUh0uSdwDl3AbhtxPyJeu8LdjvM"
+FFA_TABS = ["PMX 5TC", "PMX 4TC"]
+
+# =========================
+# Correlation / regression reference (optional, only for displaying / future extension)
+# (你说是 google sheet：1uljMVj7wvlta72rZVNLRLTp0QegpHlmGVCfxJEnfn3E
+# 这里先不强依赖它，因为我们用历史数据现场拟合就能复刻你Excel逻辑)
+# =========================
+CORR_SHEET_ID = "1uljMVj7wvlta72rZVNLRLTp0QegpHlmGVCfxJEnfn3E"
+
+
+@st.cache_data(ttl=300)
+def load_google_sheet_raw(sheet_id: str, tab_name: str) -> pd.DataFrame:
+    """
+    更通用的 Google Sheet loader：
+    - 保留所有列
+    - 自动识别 date 列并统一成 DATE
+    - 其余列尽量转 numeric（保留 NaN）
+    """
+    import io, requests
+
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={tab_name}"
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+
+    df = pd.read_csv(io.StringIO(r.text))
+    df.columns = [_clean_col_name(c) for c in df.columns]
+
+    # detect + parse DATE
+    date_col = detect_date_col(df.columns.tolist())
+    if date_col is None:
+        raise ValueError(f"No DATE column found in Google Sheet tab: {tab_name}")
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.dropna(subset=[date_col]).sort_values(date_col)
+
+    if date_col != "DATE":
+        df = df.rename(columns={date_col: "DATE"})
+
+    # numeric conversion for all non-date cols
+    for c in df.columns:
+        if c == "DATE":
+            continue
+        s = df[c]
+        if s.dtype == "object":
+            s = s.astype(str)
+            s = s.replace({"": np.nan, "—": np.nan, "–": np.nan, "N/A": np.nan, "na": np.nan})
+            s = s.str.replace("\u00A0", " ", regex=False).str.strip()
+            s = s.str.replace(",", "", regex=False)
+            s = s.str.replace(r"[^0-9\.\-]", "", regex=True)
+            s = s.replace({"": np.nan, "-": np.nan})
         df[c] = pd.to_numeric(s, errors="coerce")
 
     df = coalesce_duplicate_columns(df)
@@ -1087,18 +1196,219 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
         title_prefix="TC Avg Seasonality",
         key_prefix="tc_season",
     )
+def render_ffa_page(
+    index_df_full: pd.DataFrame,   # 用全量历史拟合回归（不要用 dff 截断）
+    dff_filtered: pd.DataFrame,    # 用筛选范围做 ratio daily 更直观
+    all_metrics: list[str],
+):
+    st.header("FFA")
 
-    # ---- Analytics controls ----
-    st.subheader("Analytics (choose a base series)")
+    # -------------------------
+    # 0) 选择 PMX 5TC / PMX 4TC (Google sheet tab)
+    # -------------------------
+    c0a, c0b = st.columns([1, 2])
+    with c0a:
+        ffa_tab = st.selectbox("Choose FFA sheet", options=FFA_TABS, index=0, key="ffa_tab_pick")
+    with c0b:
+        st.caption(f"Source: Drybulk Forward Closing Number ({ffa_tab})")
 
-    base_tc = st.selectbox(
-        "Base TC series",
+    try:
+        ffa_df = load_google_sheet_raw(FFA_SHEET_ID, ffa_tab)
+    except Exception as e:
+        st.error("Failed to load FFA Google Sheet.")
+        st.caption(f"{type(e).__name__}: {e}")
+        return
+
+    # 合约列（M+/Q+/Y+）
+    contract_cols = [c for c in ffa_df.columns if c != "DATE"]
+    if not contract_cols:
+        st.warning("No contract columns found in the FFA sheet.")
+        return
+
+    # 为了后面下拉框
+    ffa_dates = _nearest_date_options(ffa_df)
+
+    st.markdown("---")
+
+    # =========================================================
+    # 1) CALCULATION: 输入 FFA -> 预测未来 index value
+    # =========================================================
+    st.subheader("1) Calculation (FFA ➜ Index Forecast)")
+
+    # 选择要预测的“航线/指标”（来自你 index 数据里现有列）
+    # 这里给你更灵活：可选任意 metric（含 routes / index / tc）
+    target_col = st.selectbox(
+        "Choose target index/route to forecast (y)",
         options=all_metrics,
-        index=all_metrics.index(selected_tc[0]) if selected_tc else 0,
-        key="tc_base",
+        index=all_metrics.index("P5-82") if "P5-82" in all_metrics else 0,
+        key="ffa_calc_target",
     )
 
-    show_ma = st.checkbox("Show moving average", value=True, key="tc_ma_on")
+    # x-series：按 PMX 5TC/4TC 给默认映射；如果不存在就让用户自己选
+    default_x = None
+    if "5TC" in ffa_tab:
+        default_x = "BPI 82 TC AV" if "BPI 82 TC AV" in index_df_full.columns else None
+    else:
+        default_x = "BPI 74 TC AV" if "BPI 74 TC AV" in index_df_full.columns else None
+
+    x_candidates = [c for c in all_metrics if "TC AV" in c.upper() or "5TC AV" in c.upper()] or all_metrics
+
+    x_col = st.selectbox(
+        "Choose base TC series for regression (x)",
+        options=x_candidates,
+        index=(x_candidates.index(default_x) if (default_x in x_candidates) else 0),
+        key="ffa_calc_xcol",
+    )
+
+    # 选择一个日期 + 合约，从 forward curve 直接取 x_val（也可手动覆盖）
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        pick_date = st.selectbox("Pick Date (from FFA sheet)", options=ffa_dates, index=len(ffa_dates)-1, key="ffa_calc_date")
+    with c2:
+        pick_contract = st.selectbox("Pick Contract", options=contract_cols, index=0, key="ffa_calc_contract")
+
+    auto_x = _get_value_by_date(ffa_df, pick_date, pick_contract)
+
+    with c3:
+        x_val = st.number_input(
+            "FFA input (x) — you can override",
+            value=(float(auto_x) if pd.notna(auto_x) else 0.0),
+            step=10.0,
+            key="ffa_calc_xval",
+        )
+
+    # 现场拟合回归（用全量 index_df_full）
+    if x_col not in index_df_full.columns or target_col not in index_df_full.columns:
+        st.warning("Selected x or y column not found in index dataset.")
+        return
+
+    coefs = fit_poly_models(index_df_full[x_col], index_df_full[target_col])
+    if coefs is None:
+        st.info("Not enough historical overlap data to fit regression.")
+        return
+
+    # 输出三种模型预测
+    pred_linear = predict_with_poly(coefs[1], x_val)
+    pred_quad   = predict_with_poly(coefs[2], x_val)
+    pred_cubic  = predict_with_poly(coefs[3], x_val)
+
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("FFA input (x)", _fmt_2(x_val))
+    o2.metric("Linear forecast", _fmt_2(pred_linear))
+    o3.metric("Quadratic forecast", _fmt_2(pred_quad))
+    o4.metric("Cubic forecast", _fmt_2(pred_cubic))
+
+    with st.expander("Show fitted coefficients (debug)"):
+        st.write("Linear (deg=1):", coefs[1])
+        st.write("Quadratic (deg=2):", coefs[2])
+        st.write("Cubic (deg=3):", coefs[3])
+
+    st.markdown("---")
+
+    # =========================================================
+    # 2) 差值对比：两组 (Date + Contract) -> spread = 2 - 1
+    # =========================================================
+    st.subheader("2) Spread (two picks comparison)")
+
+    sc1, sc2 = st.columns(2)
+
+    with sc1:
+        st.markdown("**Leg 1**")
+        d1 = st.selectbox("Date (Leg 1)", options=ffa_dates, index=len(ffa_dates)-1, key="ffa_spread_d1")
+        k1 = st.selectbox("Contract (Leg 1)", options=contract_cols, index=0, key="ffa_spread_k1")
+        v1 = _get_value_by_date(ffa_df, d1, k1)
+        st.caption(f"Value 1: **{_fmt_2(v1)}**")
+
+    with sc2:
+        st.markdown("**Leg 2**")
+        d2 = st.selectbox("Date (Leg 2)", options=ffa_dates, index=len(ffa_dates)-1, key="ffa_spread_d2")
+        k2 = st.selectbox("Contract (Leg 2)", options=contract_cols, index=1 if len(contract_cols) > 1 else 0, key="ffa_spread_k2")
+        v2 = _get_value_by_date(ffa_df, d2, k2)
+        st.caption(f"Value 2: **{_fmt_2(v2)}**")
+
+    spread = np.nan
+    if pd.notna(v1) and pd.notna(v2):
+        spread = float(v2) - float(v1)
+
+    # 上色显示
+    if pd.isna(spread):
+        st.metric("Spread (Leg2 - Leg1)", "—")
+    else:
+        color = "#16a34a" if spread > 0 else ("#dc2626" if spread < 0 else "#6b7280")
+        st.markdown(
+            f"**Spread (Leg2 - Leg1):** <span style='color:{color}; font-weight:700'>{_fmt_2(spread)}</span>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    # =========================================================
+    # 3) RATIO: daily ratio + yearly avg ratio
+    # =========================================================
+    st.subheader("3) Ratio (FFA / Index)")
+
+    # 选一个合约 + 一个 index route
+    rc1, rc2 = st.columns([1, 1])
+    with rc1:
+        ratio_contract = st.selectbox("Choose FFA contract", options=contract_cols, index=0, key="ffa_ratio_contract")
+    with rc2:
+        ratio_route = st.selectbox("Choose index/route (denominator)", options=all_metrics, index=all_metrics.index("P5-82") if "P5-82" in all_metrics else 0, key="ffa_ratio_route")
+
+    # daily ratio：用你当前筛选范围 dff_filtered（更符合你的侧边栏 quick range）
+    if ratio_route not in dff_filtered.columns:
+        st.warning("Selected route not found in current index dataset.")
+        return
+
+    # 把 FFA 也按当前 quick range 对齐
+    # dff_filtered 的 range 是 [start_date, end_date]，这里直接用 DATE 交集
+    ffa_tmp = ffa_df[["DATE", ratio_contract]].dropna().copy()
+    idx_tmp = dff_filtered[["DATE", ratio_route]].dropna().copy()
+
+    merged = pd.merge(ffa_tmp, idx_tmp, on="DATE", how="inner")
+    merged = merged.rename(columns={ratio_contract: "FFA", ratio_route: "INDEX"})
+    merged["RATIO"] = merged["FFA"] / merged["INDEX"]
+
+    if merged.empty:
+        st.info("No overlapping dates between FFA sheet and selected index series in current range.")
+        return
+
+    # daily chart/table
+    fig_ratio = px.line(merged, x="DATE", y="RATIO", title=f"Daily Ratio: {ratio_contract} / {ratio_route}")
+    fig_ratio.update_layout(height=420, margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(fig_ratio, use_container_width=True)
+
+    show_cols = st.multiselect(
+        "Daily table columns",
+        options=["DATE", "FFA", "INDEX", "RATIO"],
+        default=["DATE", "FFA", "INDEX", "RATIO"],
+        key="ffa_ratio_tbl_cols",
+    )
+    tbl = merged[show_cols].copy()
+    tbl["DATE"] = pd.to_datetime(tbl["DATE"]).dt.date
+    st.dataframe(tbl.tail(200), use_container_width=True, height=420)
+
+    # yearly avg ratio
+    merged["YEAR"] = pd.to_datetime(merged["DATE"]).dt.year
+    yearly = (
+        merged.groupby("YEAR", as_index=False)
+        .agg(AVG_FFA=("FFA", "mean"), AVG_INDEX=("INDEX", "mean"))
+    )
+    yearly["AVG_RATIO"] = yearly["AVG_FFA"] / yearly["AVG_INDEX"]
+
+    st.markdown("**Yearly averages & ratio**")
+    st.dataframe(yearly, use_container_width=True, height=280)
+
+    # ---- Optional analytics (on any series) ----
+    st.subheader("Extra Analytics (optional)")
+
+    base_series = st.selectbox(
+        "Base series",
+        options=all_metrics,
+        index=0,
+        key="ffa_extra_base",
+    )
+
+    show_ma = st.checkbox("Show moving average", value=True, key="ffa_extra_ma_on")
     ma_window = st.number_input(
         "Moving average window (days)",
         min_value=5,
@@ -1106,35 +1416,34 @@ def render_tc_page(dff: pd.DataFrame, all_metrics: list[str]):
         value=20,
         step=1,
         disabled=not show_ma,
-        key="tc_ma_win",
+        key="ffa_extra_ma_win",
     )
 
-    show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="tc_yoymom_on")
+    show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="ffa_extra_yoymom_on")
 
-    tc_df = dff[["DATE", base_tc]].dropna()
-    tc_df = add_returns_and_changes(tc_df, base_tc)
+    tmp_df = dff_filtered[["DATE", base_series]].dropna().copy()
+    tmp_df = add_returns_and_changes(tmp_df, base_series)
 
     c1, c2 = st.columns(2)
     with c1:
         if show_ma:
-            tc_df["MA"] = moving_average(tc_df, base_tc, window=int(ma_window))
-            plot_single(tc_df, "MA", f"Moving Average ({ma_window} days)")
+            tmp_df["MA"] = moving_average(tmp_df, base_series, window=int(ma_window))
+            plot_single(tmp_df, "MA", f"Moving Average ({ma_window} days)")
     with c2:
         if show_yoy_mom:
-            mom = f"{base_tc}_mchg"
-            yoy = f"{base_tc}_ychg"
-            tmp = tc_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
-            plot_multi_line(tmp, ["MoM Change", "YoY Change"], "MoM / YoY change")
+            mom = f"{base_series}_mchg"
+            yoy = f"{base_series}_ychg"
+            tmp2 = tmp_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
+            plot_multi_line(tmp2, ["MoM Change", "YoY Change"], "MoM / YoY change")
 
-
-    st.subheader("TC DATA (table)")
+    st.subheader("Table")
     table_cols = st.multiselect(
         "Table columns",
         options=["DATE"] + all_metrics,
-        default=["DATE"] + (selected_tc[:6] if selected_tc else all_metrics[:6]),
-        key="tc_tbl",
+        default=["DATE", base_series],
+        key="ffa_tbl",
     )
-    tbl = dff[table_cols].copy()
+    tbl = dff_filtered[table_cols].copy()
     tbl["DATE"] = tbl["DATE"].dt.date
     st.dataframe(tbl, use_container_width=True, height=420)
 
@@ -1336,6 +1645,7 @@ def main():
 # -------------------------
 # Auto-load from Google Sheet on first visit
 # -------------------------
+
     if not st.session_state.get("data_loaded"):
         sheet_id = os.getenv("GOOGLE_SHEET_ID", "")
         tab_name = os.getenv("GOOGLE_SHEET_TAB", "bdi index")
@@ -1414,7 +1724,7 @@ def main():
         st.header("Default page")
         page = st.selectbox(
             "Choose page",
-            ["Home", "Index", "TC Avg", "Vessel Group"],
+            ["Home", "Index", "TC Avg", "Vessel Group", "FFA"],
             index=0,
             key="page_pick",
         )
@@ -1489,6 +1799,14 @@ def main():
     elif active == "Vessel Group":
         # default vessel group key stored in session state
         render_vessel_group_page(dff, st.session_state.vessel_group_key)
+    elif active == "FFA":
+    # 用全量 df 拟合 regression；用 dff 做 ratio 的日频对齐（符合 quick range）
+        render_ffa_page(
+            index_df_full=st.session_state.df,
+            dff_filtered=dff,
+            all_metrics=all_metrics,
+        )
+
 
 
 if __name__ == "__main__":
