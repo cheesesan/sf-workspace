@@ -343,21 +343,21 @@ def render_ai_help_chatbot(
         st.session_state.help_chat_messages = [
             {
                 "role": "assistant",
-                "content": "你好～我是这个 BDI Dashboard 的站内助手。你可以直接问：怎么找某个图、FFA 怎么算、某个报错怎么排查。",
+                "content": "你好～我是这个 BDI Dashboard 的站内助手。你可以直接问：怎么找某个图、FFA 怎么算、某个报错怎么排查。Hello~ I'm the site assistant for this BDI Dashboard. You can ask me directly: how to find a specific image, how to calculate FFA, or how to troubleshoot a certain error.",
             }
         ]
 
     # --- UI: put it at the bottom of sidebar ---
     st.markdown("---")
-    st.subheader("💬 AI Help (Gemini)")
-    st.caption("问我：怎么用这个网站 / 功能在哪 / 报错怎么排查。")
+    st.subheader("💬 AI Help")
+    st.caption("问我：怎么用这个网站 / 功能在哪 / 报错怎么排查。You could ask me: How do I use this website? Where are the functions? How do I troubleshoot errors?")
 
     # show history
     for m in st.session_state.help_chat_messages[-20:]:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    user_q = st.chat_input("例如：我想看 P2A-82 的 seasonality 怎么操作？", key="help_chat_input")
+    user_q = st.chat_input("例如：我想看 P2A-82 的 seasonality 怎么操作？For example: How do I check the seasonality of P2A-82?", key="help_chat_input")
     if not user_q:
         return
 
