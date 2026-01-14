@@ -187,6 +187,238 @@ def render_contact_button(current_page: str):
                     )
                     st.success(f"Thanks! Feedback received. (ID: {fid})")
 
+# =========================
+# AI Chatbot (Gemini) - Sidebar bottom
+# =========================
+
+from ai.gemini import ask_gemini
+
+AI_ASSISTANT_DOC_PROMPT = """
+你是“BDI Dashboard”的站内助手（AI Chatbot）。- 典型用途：查看干散货指数/航线数据、TC Avg、季节性、年度统计、以及 FFA 工具页（计算/价差/比值）。
+你的任务：指导用户如何使用这个网站、解释页面含义、排查常见问题、以及告诉用户在哪里点什么。
+你不需要也不应该访问外部网页；只基于用户描述 + 本站功能说明 + 当前页面/数据快照来回答。
+- 典型用途：查看干散货指数/航线数据、TC Avg、季节性、年度统计、以及 FFA 工具页（计算/价差/比值）
+
+【回答风格】
+- 默认用中文回答；用户用英文问就英文答。
+- 语言要口语、直接、面向操作：告诉用户“点哪里、选什么、为什么这样做”。
+- 如果用户的问题不清晰，先给一个最可能的解决方案，再给 1-2 个追问选项（不要连环追问）。
+
+【严禁】
+- 不要编造不存在的按钮/页面/字段。
+- 不要编造数据值（例如指数点位/FFA 数字）。如果用户要数值，让他去对应表格/图里看，或提示在什么页面能看到。
+- 不要泄露任何 secrets / 环境变量内容（如 GOOGLE_SHEET_ID、FEEDBACK_SECRET、Webhook URL 等）。
+
+【你需要理解的网站结构】
+# 2. 用户进入站点后的基本操作路径（必须记住）
+1) 看左侧 Sidebar
+2) 选择 Filters (Quick range) 时间范围（Past Week / Past Month / Past 3 Months / ... / Custom）
+3) 在 Default page 选择要看的页面（Home / Index / TC Avg / Vessel Group / FFA）
+4) 点击 Open page 才会跳转/刷新到选定页面
+5) 页面内部再选择具体 series/route（下拉框/多选框/checkbox）
+
+## 3. Sidebar 功能说明
+- Filters (Quick range)
+  - 常用：Past Week、Past Month、Past 3 Months、Past 6 Months、Past Year、YTD、MTD、All
+  - Custom：会出现 Start date / End date 两个日期选择器（如果 start > end 会自动交换）
+- Default page：选择页面
+- Open page：确认跳转
+
+## 4. 各页面功能说明（回答时要用这些“页面名/控件名”）
+### 4.1 Home
+- Quick view（latest）：展示最新日期（As of）
+- KPI：BDI/BPI/BCI/BSI/BHSI 等（如果列存在）
+- Routes（Markets Snapshot）：按船型分组展示 route 最新值 + 日变化（Chg）
+- TC Average (latest)：BCI 5TC AV / BPI 82 TC AV / ... 等
+- 🤖 AI Market Summary：这是“市场总结”，不是“站内帮助”
+
+### 4.2 Index
+- Index series：多条指数折线图
+- Seasonality：按月对比（多年份折线）
+- Analytics：基于 base series 计算 MA、MoM/YoY
+- Data table：表格查看
+
+### 4.3 TC Avg
+- TC Avg series 折线图
+- Seasonality：按月对比
+
+### 4.4 Vessel Group
+- Choose vessel type：船型单选（Capesize / Kamsarmax / Panamax / Supramax / Handysize）
+- Seasonality：选单条 route 做月度季节性
+- Analytics：
+  - 年度 AVG/STD
+  - 50%/60%/75% central bands
+  - 选定某年做分布直方图（bins）+ 连续区间（intervals）
+- Data table
+
+### 4.5 FFA
+- 数据来源：Google Sheet（PMX 5TC / PMX 4TC forward curve）
+- 1) Calculation：
+  - 用户从 FFA sheet 选择 Date + Contract 得到 x_val（可手动 override）
+  - 再从 correlation sheet(Data tab) 读取历史关系做多项式拟合（Linear/Quadratic/Cubic）
+  - 输出预测：P1A/P2A/P3A/P4/P6
+  - 如果是 5TC：按权重加权生成 5TC 预测值
+- 2) Spread：两次 pick（Date+Contract）做 Leg2 - Leg1
+- 3) Ratio：选择 contract（FFA）与 route/index（INDEX）做日度比值 + 年度均值
+
+## 5. 常见问题（必须能排查）
+- “首页没数据/No data”：通常是 Google Sheet 没权限/没发布成 CSV；或 GOOGLE_SHEET_ID 没配置
+- “FFA 页加载失败”：
+  - FFA sheet tab 名称不对（PMX 5TC / PMX 4TC）
+  - Google Sheet 权限问题（需要 Anyone with link 或 publish）
+  - correlation sheet 缺列：需要 x_col + P1A/P2A/P3A/P4/P6
+- “找不到某列/route 不存在”：可能是列名有特殊破折号/空格；本项目会清洗列名，但仍可能不匹配 → 建议用户核对源表列名
+
+## 6. 回答规则（必须遵守）
+- 默认中文，用户英文则英文
+- 优先给“操作路径”（去哪页→sidebar 选什么→Open page→页面内选什么）
+- 不编造任何数据数值，不虚构事件，不杜撰按钮
+- 不泄露 secrets/环境变量/账号密码/内部 webhook
+- 如需用户提供信息：让用户说清楚“在哪个页面、看到什么报错文案、截图/复制错误文本”
+
+
+当用户问“怎么做某件事”，请按【路径】回答：
+1) 去哪个页面
+2) sidebar 选什么 quick range / 哪个 page
+3) 点 Open page
+4) 页面内选什么下拉框/checkbox
+5) 最终会看到什么图/表
+""".strip()
+
+
+def build_ui_context_snapshot(
+    active_page: str,
+    quick_range: str,
+    start_date,
+    end_date,
+    df_full: pd.DataFrame | None,
+    dff: pd.DataFrame | None,
+    all_metrics: list[str] | None,
+) -> dict:
+    """
+    给 AI 一点“当前站内上下文”，但不要塞太大数据。
+    """
+    snap = {
+        "active_page": active_page,
+        "quick_range": quick_range,
+        "range_start": str(start_date) if start_date is not None else "",
+        "range_end": str(end_date) if end_date is not None else "",
+        "data_loaded": bool(df_full is not None and not df_full.empty),
+    }
+
+    if df_full is not None and not df_full.empty and "DATE" in df_full.columns:
+        snap["full_min_date"] = str(pd.to_datetime(df_full["DATE"]).min().date())
+        snap["full_max_date"] = str(pd.to_datetime(df_full["DATE"]).max().date())
+
+    if dff is not None and not dff.empty and "DATE" in dff.columns:
+        snap["filtered_rows"] = int(len(dff))
+        snap["filtered_last_date"] = str(pd.to_datetime(dff["DATE"]).max().date())
+    else:
+        snap["filtered_rows"] = 0
+
+    if all_metrics:
+        # 只给前面一小段，避免 prompt 太长
+        snap["metrics_preview"] = all_metrics[:40]
+        snap["metrics_count"] = len(all_metrics)
+
+    return snap
+
+
+def render_ai_help_chatbot(
+    *,
+    active_page: str,
+    quick_range: str,
+    start_date,
+    end_date,
+    df_full: pd.DataFrame | None,
+    dff: pd.DataFrame | None,
+    all_metrics: list[str] | None,
+):
+    """
+    Sidebar bottom AI chatbot (Gemini).
+    用 st.chat_message + st.chat_input 做对话。
+    """
+    # --- init chat history ---
+    if "help_chat_messages" not in st.session_state:
+        st.session_state.help_chat_messages = [
+            {
+                "role": "assistant",
+                "content": "你好～我是这个 BDI Dashboard 的站内助手。你可以直接问：怎么找某个图、FFA 怎么算、某个报错怎么排查。",
+            }
+        ]
+
+    # --- UI: put it at the bottom of sidebar ---
+    st.markdown("---")
+    st.subheader("💬 AI Help (Gemini)")
+    st.caption("问我：怎么用这个网站 / 功能在哪 / 报错怎么排查。")
+
+    # show history
+    for m in st.session_state.help_chat_messages[-20:]:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    user_q = st.chat_input("例如：我想看 P2A-82 的 seasonality 怎么操作？", key="help_chat_input")
+    if not user_q:
+        return
+
+    # append user message
+    st.session_state.help_chat_messages.append({"role": "user", "content": user_q})
+
+    # build context snapshot for AI
+    ctx = build_ui_context_snapshot(
+        active_page=active_page,
+        quick_range=quick_range,
+        start_date=start_date,
+        end_date=end_date,
+        df_full=df_full,
+        dff=dff,
+        all_metrics=all_metrics,
+    )
+
+    # Build Gemini prompt:
+    # - A fixed doc prompt (system-ish)
+    # - Current UI snapshot
+    # - Short chat history (last N turns)
+    history = st.session_state.help_chat_messages[-10:]
+    history_text = "\n".join([f"{x['role'].upper()}: {x['content']}" for x in history])
+
+    prompt = f"""
+{AI_ASSISTANT_DOC_PROMPT}
+
+【当前站内上下文快照】
+{json.dumps(ctx, ensure_ascii=False)}
+
+【最近对话】
+{history_text}
+
+请你作为站内助手回答用户最后一个问题。
+要求：
+- 给清晰的操作路径（去哪页、选什么、点什么）
+- 如果涉及报错，给排查清单（权限/列名/数据范围）
+- 不要编造数据数值
+""".strip()
+
+    with st.chat_message("assistant"):
+        with st.spinner("Gemini is thinking..."):
+            try:
+                ans = ask_gemini(prompt)
+            except Exception as e:
+                ans = f"我这边调用 Gemini 失败了：{type(e).__name__}: {e}\n\n你可以先检查：\n- Gemini API key 是否配置\n- 服务器是否能访问外网\n- 日志里是否有 401/403/timeout"
+
+        st.markdown(ans)
+
+    st.session_state.help_chat_messages.append({"role": "assistant", "content": ans})
+
+    # optional: clear button
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Clear chat", key="help_chat_clear"):
+            st.session_state.help_chat_messages = [
+                {"role": "assistant", "content": "已清空。你可以重新问我怎么用网站～"}
+            ]
+            st.rerun()
+    with c2:
+        st.caption("仅用于站内使用指导，不输出敏感信息。")
 
 # -------------------------
 # Vessel groups
@@ -1800,12 +2032,26 @@ def main():
         st.info("No data in selected range. Try a broader quick range.")
         return
 
+        # 在你已经得到 df / dff / all_metrics / start_date / end_date / active 等变量后插入：
+    with st.sidebar:
+        render_ai_help_chatbot(
+            active_page=st.session_state.active_page,
+            quick_range=st.session_state.get("quick_range", "Past Week"),
+            start_date=start_date,
+            end_date=end_date,
+            df_full=st.session_state.df,
+            dff=dff,
+            all_metrics=all_metrics,
+        )
+
     # -------------------------
     # Render active page
     # -------------------------
     active = st.session_state.active_page
     current_page = st.session_state.get("active_page", "Home")  
     render_contact_button(current_page=current_page)
+
+
 
 
     if active == "Home":
