@@ -1469,57 +1469,7 @@ def render_ffa_page(
     st.markdown("**Yearly averages & ratio**")
     st.dataframe(yearly, use_container_width=True, height=280)
 
-    # ---- Optional analytics (on any series) ----
-    st.subheader("Extra Analytics (optional)")
-
-    base_series = st.selectbox(
-        "Base series",
-        options=all_metrics,
-        index=0,
-        key="ffa_extra_base",
-    )
-
-    show_ma = st.checkbox("Show moving average", value=True, key="ffa_extra_ma_on")
-    ma_window = st.number_input(
-        "Moving average window (days)",
-        min_value=5,
-        max_value=120,
-        value=20,
-        step=1,
-        disabled=not show_ma,
-        key="ffa_extra_ma_win",
-    )
-
-    show_yoy_mom = st.checkbox("Show YoY / MoM change", value=True, key="ffa_extra_yoymom_on")
-
-    tmp_df = dff_filtered[["DATE", base_series]].dropna().copy()
-    tmp_df = add_returns_and_changes(tmp_df, base_series)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if show_ma:
-            tmp_df["MA"] = moving_average(tmp_df, base_series, window=int(ma_window))
-            plot_single(tmp_df, "MA", f"Moving Average ({ma_window} days)")
-    with c2:
-        if show_yoy_mom:
-            mom = f"{base_series}_mchg"
-            yoy = f"{base_series}_ychg"
-            tmp2 = tmp_df.rename(columns={mom: "MoM Change", yoy: "YoY Change"})
-            plot_multi_line(tmp2, ["MoM Change", "YoY Change"], "MoM / YoY change")
-
-    st.subheader("Table")
-    table_cols = st.multiselect(
-        "Table columns",
-        options=["DATE"] + all_metrics,
-        default=["DATE", base_series],
-        key="ffa_tbl",
-    )
-    tbl = dff_filtered[table_cols].copy()
-    tbl["DATE"] = tbl["DATE"].dt.date
-    st.dataframe(tbl, use_container_width=True, height=420)
-
-vessel_group_key = st.session_state.get("vessel_group_key", "UNKNOWN")
-vessel_group_label = VESSEL_LABELS.get(vessel_group_key, vessel_group_key)
+    
 def render_vessel_group_page(dff: pd.DataFrame, vessel_group_key: str):
     st.header("Vessel Group")
 
