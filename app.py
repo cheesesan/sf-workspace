@@ -414,11 +414,11 @@ def render_ai_help_chatbot(
     with c1:
         if st.button("Clear chat", key="help_chat_clear"):
             st.session_state.help_chat_messages = [
-                {"role": "assistant", "content": "已清空。你可以重新问我怎么用网站～"}
+                {"role": "assistant", "content": "It's been cleared. You can ask me again how to use the website."}
             ]
             st.rerun()
     with c2:
-        st.caption("仅用于站内使用指导，不输出敏感信息。")
+        st.caption("This is for internal use guidance only and does not output sensitive information.")
 
 # -------------------------
 # Vessel groups
